@@ -6,6 +6,147 @@ import WalletContext
 import BuildConfig
 import ApiCredentials
 import LocalAuthentication
+import Darwin
+import MachO
+
+private var realSecItemAdd: (@convention(c) (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus)?
+private var realSecItemCopyMatching: (@convention(c) (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus)?
+private var realSecItemUpdate: (@convention(c) (CFDictionary, CFDictionary) -> OSStatus)?
+private var realSecItemDelete: (@convention(c) (CFDictionary) -> OSStatus)?
+
+private var symAdd: UnsafeMutableRawPointer?
+private var repAdd: UnsafeMutableRawPointer?
+private var symMatch: UnsafeMutableRawPointer?
+private var repMatch: UnsafeMutableRawPointer?
+private var symUpdate: UnsafeMutableRawPointer?
+private var repUpdate: UnsafeMutableRawPointer?
+private var symDelete: UnsafeMutableRawPointer?
+private var repDelete: UnsafeMutableRawPointer?
+
+private func hookedSecItemAdd(_ attributes: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+    guard let real = realSecItemAdd else { return errSecParam }
+    let dict = attributes as NSDictionary
+    if dict[kSecUseDataProtectionKeychain as String] == nil {
+        let mutable = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, attributes)!
+        CFDictionarySetValue(mutable, Unmanaged.passUnretained(kSecUseDataProtectionKeychain).toOpaque(), Unmanaged.passUnretained(kCFBooleanFalse).toOpaque())
+        return real(mutable, result)
+    }
+    return real(attributes, result)
+}
+
+private func hookedSecItemCopyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+    guard let real = realSecItemCopyMatching else { return errSecParam }
+    let dict = query as NSDictionary
+    if dict[kSecUseDataProtectionKeychain as String] == nil {
+        let mutable = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, query)!
+        CFDictionarySetValue(mutable, Unmanaged.passUnretained(kSecUseDataProtectionKeychain).toOpaque(), Unmanaged.passUnretained(kCFBooleanFalse).toOpaque())
+        return real(mutable, result)
+    }
+    return real(query, result)
+}
+
+private func hookedSecItemUpdate(_ query: CFDictionary, _ attributesToUpdate: CFDictionary) -> OSStatus {
+    guard let real = realSecItemUpdate else { return errSecParam }
+    let dict = query as NSDictionary
+    if dict[kSecUseDataProtectionKeychain as String] == nil {
+        let mutable = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, query)!
+        CFDictionarySetValue(mutable, Unmanaged.passUnretained(kSecUseDataProtectionKeychain).toOpaque(), Unmanaged.passUnretained(kCFBooleanFalse).toOpaque())
+        return real(mutable, attributesToUpdate)
+    }
+    return real(query, attributesToUpdate)
+}
+
+private func hookedSecItemDelete(_ query: CFDictionary) -> OSStatus {
+    guard let real = realSecItemDelete else { return errSecParam }
+    let dict = query as NSDictionary
+    if dict[kSecUseDataProtectionKeychain as String] == nil {
+        let mutable = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, query)!
+        CFDictionarySetValue(mutable, Unmanaged.passUnretained(kSecUseDataProtectionKeychain).toOpaque(), Unmanaged.passUnretained(kCFBooleanFalse).toOpaque())
+        return real(mutable)
+    }
+    return real(query)
+}
+
+private func patchDyldImageHeader(header: UnsafePointer<mach_header>?, slide: Int) {
+    guard let header = header else { return }
+    let pageSize = sysconf(_SC_PAGESIZE)
+    var cur = UnsafeRawPointer(header).advanced(by: MemoryLayout<mach_header_64>.size)
+    for _ in 0 ..< header.pointee.ncmds {
+        let lc = cur.assumingMemoryBound(to: load_command.self)
+        if lc.pointee.cmd == LC_SEGMENT_64 {
+            let seg = cur.assumingMemoryBound(to: segment_command_64.self)
+            let segName = withUnsafePointer(to: seg.pointee.segname) {
+                $0.withMemoryRebound(to: CChar.self, capacity: 16) { String(cString: $0) }
+            }
+            if segName.hasPrefix("__DATA") {
+                let sectPtr = cur.advanced(by: MemoryLayout<segment_command_64>.size).assumingMemoryBound(to: section_64.self)
+                for k in 0 ..< Int(seg.pointee.nsects) {
+                    let sect = sectPtr.advanced(by: k).pointee
+                    let sectName = withUnsafePointer(to: sect.sectname) {
+                        $0.withMemoryRebound(to: CChar.self, capacity: 16) { String(cString: $0) }
+                    }
+                    if sectName == "__got" || sectName == "__la_symbol_ptr" || sectName == "__auth_got" {
+                        guard let got = UnsafeMutablePointer<UnsafeMutableRawPointer?>.init(bitPattern: UInt(slide + Int(sect.addr))) else {
+                            continue
+                        }
+                        let countPtrs = Int(sect.size) / MemoryLayout<UnsafeMutableRawPointer?>.size
+                        for p in 0 ..< countPtrs {
+                            let targetRep: UnsafeMutableRawPointer?
+                            if got[p] == symAdd {
+                                targetRep = repAdd
+                            } else if got[p] == symMatch {
+                                targetRep = repMatch
+                            } else if got[p] == symUpdate {
+                                targetRep = repUpdate
+                            } else if got[p] == symDelete {
+                                targetRep = repDelete
+                            } else {
+                                targetRep = nil
+                            }
+                            if let targetRep {
+                                let ptrAddr = UInt(bitPattern: got.advanced(by: p))
+                                let pageStart = ptrAddr & ~UInt(pageSize - 1)
+                                mprotect(UnsafeMutableRawPointer(bitPattern: pageStart), pageSize, PROT_READ | PROT_WRITE)
+                                got[p] = targetRep
+                                mprotect(UnsafeMutableRawPointer(bitPattern: pageStart), pageSize, PROT_READ)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        cur = cur.advanced(by: Int(lc.pointee.cmdsize))
+    }
+}
+
+private var didInstallKeychainHook = false
+private let keychainHookLock = NSLock()
+
+private func installKeychainDataProtectionCompatHook() {
+    keychainHookLock.lock()
+    defer { keychainHookLock.unlock() }
+    guard !didInstallKeychainHook else { return }
+    didInstallKeychainHook = true
+
+    let handle = dlopen(nil, RTLD_NOW)
+    symAdd = dlsym(handle, "SecItemAdd")
+    realSecItemAdd = unsafeBitCast(symAdd, to: (@convention(c) (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus).self)
+    repAdd = unsafeBitCast(hookedSecItemAdd as (@convention(c) (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus), to: UnsafeMutableRawPointer.self)
+
+    symMatch = dlsym(handle, "SecItemCopyMatching")
+    realSecItemCopyMatching = unsafeBitCast(symMatch, to: (@convention(c) (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus).self)
+    repMatch = unsafeBitCast(hookedSecItemCopyMatching as (@convention(c) (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus), to: UnsafeMutableRawPointer.self)
+
+    symUpdate = dlsym(handle, "SecItemUpdate")
+    realSecItemUpdate = unsafeBitCast(symUpdate, to: (@convention(c) (CFDictionary, CFDictionary) -> OSStatus).self)
+    repUpdate = unsafeBitCast(hookedSecItemUpdate as (@convention(c) (CFDictionary, CFDictionary) -> OSStatus), to: UnsafeMutableRawPointer.self)
+
+    symDelete = dlsym(handle, "SecItemDelete")
+    realSecItemDelete = unsafeBitCast(symDelete, to: (@convention(c) (CFDictionary) -> OSStatus).self)
+    repDelete = unsafeBitCast(hookedSecItemDelete as (@convention(c) (CFDictionary) -> OSStatus), to: UnsafeMutableRawPointer.self)
+
+    _dyld_register_func_for_add_image(patchDyldImageHeader)
+}
 
 func passcodeCredentialKind(for code: String) -> PasscodeKind {
     let normalized = PasscodeKind.digits4.normalize(code)
@@ -79,6 +220,7 @@ private func passcodeCredentialOperation(_ completion: @escaping PasscodeCredent
 }
 
 func installPasscodeUIHooks() {
+    installKeychainDataProtectionCompatHook()
     var hooks = PasscodeCredentialHooks()
     hooks.passcodeInstalled = { code, completion in
         guard #available(macOS 10.15, *) else {
@@ -151,17 +293,33 @@ func installPasscodeUIHooks() {
             completion(.failure(.failed))
             return
         }
-        passcodeCredentialOperation(completion) {
-            let session = try passcodeSettingsSession(code: code)
-            let laContext = LAContext()
-            laContext.localizedReason = strings().walletBiometricsEnableReason
-            laContext.localizedFallbackTitle = ""
-            laContext.touchIDAuthenticationAllowableReuseDuration = 0
-            defer {
-                laContext.invalidate()
-                session.invalidate()
+        let laContext = LAContext()
+        laContext.localizedReason = strings().walletBiometricsEnableReason
+        laContext.localizedFallbackTitle = ""
+        laContext.touchIDAuthenticationAllowableReuseDuration = 0
+        let perform: () -> Void = {
+            passcodeCredentialOperation(completion) {
+                let session = try passcodeSettingsSession(code: code)
+                defer {
+                    laContext.invalidate()
+                    session.invalidate()
+                }
+                try setWalletBiometricsEnabled(enabled, session: session, context: laContext)
             }
-            try setWalletBiometricsEnabled(enabled, session: session, context: laContext)
+        }
+        if enabled {
+            laContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: strings().walletBiometricsEnableReason) { success, _ in
+                if success {
+                    perform()
+                } else {
+                    laContext.invalidate()
+                    Queue.mainQueue().async {
+                        completion(.failure(.failed))
+                    }
+                }
+            }
+        } else {
+            perform()
         }
     }
     PasscodeCredentialHooks.install(hooks)
