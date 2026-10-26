@@ -3,6 +3,7 @@ import InviteLinksUI
 import TGUIKit
 import Postbox
 import TelegramCore
+import SwiftSignalKit
 import DateUtils
 import FoundationUtils
 import MessageUtils
@@ -933,6 +934,77 @@ class ServiceEventLogItem: TableRowItem {
         textLayout.measure(width: width - (defaultContentInset.left + defaultContentInset.right))
         contentMessageItem?.measure(width - (defaultContentInset.left + defaultContentInset.right))
         return success
+    }
+
+    override func menuItems(in location: NSPoint) -> Signal<[ContextMenuItem], NoError> {
+        let channel = chatInteraction.peer as? TelegramChannel
+        guard let channel = channel, !channel.isChannel, channel.hasPermission(.banMembers) else {
+            return .single([])
+        }
+        let context = chatInteraction.interactionContext
+        let peerId = self.peerId
+
+        var targetPeers: [Peer] = []
+        switch entry.event.action {
+        case .deleteMessage:
+            targetPeers = getGroupPeers(self.group)
+        case .participantJoin, .participantJoinedViaInvite, .participantJoinByRequest, .participantLeave:
+            if let peer = entry.peers[entry.event.peerId] {
+                targetPeers = [peer]
+            }
+        case let .participantToggleBan(prev, new):
+            targetPeers = [new.peer._asPeer()]
+        case let .participantToggleAdmin(prev, new):
+            targetPeers = [new.peer._asPeer()]
+        case let .participantInvite(participant):
+            targetPeers = [participant.peer._asPeer()]
+        case let .editMessage(prev, new):
+            if let author = new.author {
+                targetPeers = [author]
+            }
+        case let .sendMessage(message):
+            if let author = message.author {
+                targetPeers = [author]
+            }
+        default:
+            if let peer = entry.peers[entry.event.peerId] {
+                targetPeers = [peer]
+            }
+        }
+
+        targetPeers = targetPeers.filter { $0.id != context.peerId && ($0.isUser || $0.isBot) }
+        guard !targetPeers.isEmpty else {
+            return .single([])
+        }
+
+        var items: [ContextMenuItem] = []
+        for target in targetPeers {
+            let restrictTitle: String
+            let banTitle: String
+            if targetPeers.count == 1 {
+                restrictTitle = strings().chatContextRestrict
+                banTitle = strings().chatContextBan
+            } else {
+                restrictTitle = "\(strings().chatContextRestrict) - \(target.compactDisplayTitle)"
+                banTitle = "\(strings().chatContextBan) - \(target.compactDisplayTitle)"
+            }
+
+            items.append(ContextMenuItem(restrictTitle, handler: {
+                _ = showModalProgress(signal: context.engine.peers.fetchChannelParticipant(peerId: peerId, participantId: target.id), for: context.window).start(next: { participant in
+                    showModal(with: ChatHistoryUIHooks.shared.makeRestrictedModalController(context, peerId, target.id, participant, { updatedRights in
+                        _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: target.id, bannedRights: updatedRights).startStandalone()
+                        _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
+                    }), for: context.window)
+                })
+            }))
+
+            items.append(ContextMenuItem(banTitle, handler: {
+                _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: target.id, bannedRights: TelegramChatBannedRights(flags: [.banReadMessages], untilDate: Int32.max)).startStandalone()
+                _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
+            }, itemMode: .destruct))
+        }
+
+        return .single(items)
     }
 }
 

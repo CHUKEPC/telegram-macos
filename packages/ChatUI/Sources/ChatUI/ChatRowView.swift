@@ -1514,6 +1514,13 @@ public class ChatRowView: TableRowView, Notifable, MultipleSelectable, ChatTextS
                                     }
                                 })
                             }, itemImage: MenuAnimation.menu_restrict.value))
+
+                            if chatInteraction?.isLogInteraction == true {
+                                menu.addItem(ContextMenuItem(strings().chatContextBan, handler: {
+                                    _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: authorId, bannedRights: TelegramChatBannedRights(flags: [.banReadMessages], untilDate: Int32.max)).startStandalone()
+                                    _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
+                                }, itemMode: .destruct, itemImage: MenuAnimation.menu_ban.value))
+                            }
                         }
 
                         if channel.hasPermission(.addAdmins) {
