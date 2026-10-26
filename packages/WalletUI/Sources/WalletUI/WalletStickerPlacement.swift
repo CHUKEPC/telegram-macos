@@ -28,7 +28,7 @@ struct WalletStickerPlacement {
         guard CGRect(origin: .zero, size: size).insetBy(dx: edge, dy: edge).contains(center) else {
             return false
         }
-        let r = side * scale * 0.36
+        let r = side * scale * 0.48
         for rect in obstacles {
             let p = CGPoint(x: min(max(center.x, rect.minX), rect.maxX), y: min(max(center.y, rect.minY), rect.maxY))
             if hypot(p.x - center.x, p.y - center.y) < r {
@@ -115,7 +115,7 @@ struct WalletStickerPlacement {
                 for o in obstacles {
                     obstacleRoom = min(obstacleRoom, hypot(min(max(x, o.minX), o.maxX) - x, min(max(y, o.minY), o.maxY) - y))
                 }
-                sc = min(sc, obstacleRoom / (S * 0.44))
+                sc = min(sc, obstacleRoom / (S * 0.48))
                 for g in others {
                     sc = min(sc, hypot(g.center.x - x, g.center.y - y) / (S * 0.29) - g.scale)
                 }

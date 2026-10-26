@@ -581,6 +581,11 @@ public final class WalletCardView: View {
             textView.disableBackgroundDrawing = true
             textView.isEventLess = true
         }
+        stickerView.isEventLess = true
+        stickerMaskLayer.contentsGravity = .resize
+        faceView.addSubview(stickerView)
+        stickerView.layer?.addSublayer(stickerHintLayer)
+
         for textView in [nameView, recipientView] {
             faceView.addSubview(textView)
         }
@@ -601,11 +606,6 @@ public final class WalletCardView: View {
         qrIconView.contentGravity = .resizeAspect
         qrButton.addSubview(qrIconView)
         faceView.addSubview(qrButton)
-
-        stickerView.isEventLess = true
-        stickerMaskLayer.contentsGravity = .resize
-        faceView.addSubview(stickerView)
-        stickerView.layer?.addSublayer(stickerHintLayer)
 
         for textView in [integralView, fractionalView, currencyView, fiatView] {
             faceView.addSubview(textView)
@@ -1577,11 +1577,23 @@ extension WalletCardView {
     }
 
     var stickerObstacles: [NSRect] {
-        var rects = [walletCardScaledFrame(integralView, balanceScale), walletCardScaledFrame(currencyView, balanceScale), walletCardScaledFrame(fiatView, fiatScale), nameView.frame, addressView.frame, qrButton.frame, gramIconView.frame]
+        var addressObstacle = addressView.frame
+        if !addressView.isHidden && !addressObstacle.isEmpty {
+            addressObstacle = NSMakeRect(addressObstacle.minX - 6, 0, frame.width - addressObstacle.minX + 6, frame.height)
+        }
+        var rects = [
+            walletCardScaledFrame(integralView, balanceScale),
+            walletCardScaledFrame(currencyView, balanceScale),
+            walletCardScaledFrame(fiatView, fiatScale),
+            nameView.frame,
+            addressObstacle,
+            qrButton.frame.insetBy(dx: -6, dy: -6),
+            gramIconView.frame
+        ]
         if !fractionalView.isHidden {
             rects.append(walletCardScaledFrame(fractionalView, balanceScale))
         }
-        return rects.filter { !$0.isEmpty }.map { $0.insetBy(dx: -3, dy: -3) }
+        return rects.filter { !$0.isEmpty }.map { $0.insetBy(dx: -4, dy: -4) }
     }
 
     func stickerCenter(_ sticker: WalletContext.CardSticker) -> NSPoint {
