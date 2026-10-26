@@ -295,15 +295,12 @@ public class StickerPackPanelRowItem: TableRowItem {
         let packInfo = self.packInfo
         let canSend = self.canSend
         
-        let _savedStickersData: Signal<(count: Int, savedIds: Set<MediaId>), NoError> = context.account.postbox.itemCollectionsView(orderedItemListCollectionIds: [Namespaces.OrderedItemList.CloudSavedStickers], namespaces: [Namespaces.ItemCollection.CloudStickerPacks], aroundIndex: nil, count: 100) |> take(1) |> map { view in
-            let items = view.orderedItemListsViews[0].items
-            let ids = Set(items.compactMap { ($0.contents.get(SavedStickerItem.self))?.file.fileId })
-            return (items.count, ids)
+        let _savedStickers: Signal<[MediaId], NoError> = context.account.postbox.itemCollectionsView(orderedItemListCollectionIds: [Namespaces.OrderedItemList.CloudSavedStickers], namespaces: [Namespaces.ItemCollection.CloudStickerPacks], aroundIndex: nil, count: 100) |> take(1) |> map {
+            $0.orderedItemListsViews[0].items.compactMap { $0.contents.get(SavedStickerItem.self)?.file.fileId }
         } |> deliverOnMainQueue
 
-        return _savedStickersData |> map { [weak self] savedStickersData in
-            let savedStickersCount = savedStickersData.count
-            let savedIds = savedStickersData.savedIds
+        return _savedStickers |> map { [weak self] savedStickers in
+            let savedStickersCount = savedStickers.count
             var items:[ContextMenuItem] = []
 
             for file in files {
@@ -339,26 +336,28 @@ public class StickerPackPanelRowItem: TableRowItem {
                     default:
                         break inner
                     }
-                    let isSaved = savedIds.contains(file.fileId) || packInfo == .saved
-                    if packInfo != .saved, packInfo.installed || packInfo == .recent {
-                        if !isSaved {
-                            items.append(ContextMenuItem(strings().chatContextAddFavoriteSticker, handler: {
-                                let limit = context.isPremium ? context.premiumLimits.stickers_faved_limit_premium : context.premiumLimits.stickers_faved_limit_default
-                                if limit >= savedStickersCount, !context.isPremium {
-                                    showModalText(for: context.window, text: strings().chatContextFavoriteStickersLimitInfo("\(context.premiumLimits.stickers_faved_limit_premium)"), title: strings().chatContextFavoriteStickersLimitTitle, callback: { value in
-                                        FeatureNavigationHooks.shared.showPremiumLimit(context, .faveStickers)
-                                    })
-                                } else {
+                    if packInfo.installed, savedStickers.contains(file.fileId) {
+                        items.append(ContextMenuItem(strings().chatContextRemoveFavoriteSticker, handler: {
+                            showModalText(for: context.window, text: strings().chatContextStickerRemovedFromFavorites)
+                            _ = removeSavedSticker(postbox: context.account.postbox, mediaId: file.fileId).start()
+                        }, itemMode: .destruct, itemImage: MenuAnimation.menu_remove_from_favorites.value))
+                    } else if packInfo.installed || packInfo == .recent {
+                        items.append(ContextMenuItem(strings().chatContextAddFavoriteSticker, handler: {
+                            let limit = context.isPremium ? context.premiumLimits.stickers_faved_limit_premium : context.premiumLimits.stickers_faved_limit_default
+                            let reachedLimit = savedStickersCount >= limit && !context.isPremium
+                            if reachedLimit {
+                                showModalText(for: context.window, text: strings().chatContextFavoriteStickersLimitInfo("\(context.premiumLimits.stickers_faved_limit_premium)"), title: strings().chatContextFavoriteStickersLimitTitle, callback: { value in
+                                    FeatureNavigationHooks.shared.showPremiumLimit(context, .faveStickers)
+                                })
+                            }
+                            _ = (addSavedSticker(postbox: context.account.postbox, network: context.account.network, file: file, limit: limit) |> deliverOnMainQueue).start(error: { _ in
+                                showModalText(for: context.window, text: strings().unknownError)
+                            }, completed: {
+                                if !reachedLimit {
                                     showModalText(for: context.window, text: strings().chatContextStickerAddedToFavorites)
                                 }
-                                _ = addSavedSticker(postbox: context.account.postbox, network: context.account.network, file: file).start()
-                            }, itemImage: MenuAnimation.menu_add_to_favorites.value))
-                        } else {
-                            items.append(ContextMenuItem(strings().chatContextRemoveFavoriteSticker, handler: {
-                                showModalText(for: context.window, text: strings().chatContextStickerRemovedFromFavorites)
-                                _ = removeSavedSticker(postbox: context.account.postbox, mediaId: file.fileId).start()
-                            }, itemImage: MenuAnimation.menu_remove_from_favorites.value))
-                        }
+                            })
+                        }, itemImage: MenuAnimation.menu_add_to_favorites.value))
                     }
 
                     if canSend {
@@ -391,7 +390,7 @@ public class StickerPackPanelRowItem: TableRowItem {
                         }, itemMode: .destruct, itemImage: MenuAnimation.menu_delete.value))
                     } else if packInfo == .saved {
                         if let mediaId = file.id {
-                            items.append(ContextMenuItem(strings().contextRemoveFaveSticker, handler: {
+                            items.append(ContextMenuItem(strings().chatContextRemoveFavoriteSticker, handler: {
                                 showModalText(for: context.window, text: strings().chatContextStickerRemovedFromFavorites)
                                 _ = removeSavedSticker(postbox: context.account.postbox, mediaId: mediaId).start()
                             }, itemMode: .destruct, itemImage: MenuAnimation.menu_remove_from_favorites.value))
