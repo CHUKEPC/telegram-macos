@@ -9064,6 +9064,8 @@ public final class L10n {
   public static var generalSettingsShowCallsTab: String  { return L10n.tr("Localizable", "GeneralSettings.ShowCallsTab") }
   /// Show Contacts Tab
   public static var generalSettingsShowContactsTab: String  { return L10n.tr("Localizable", "GeneralSettings.ShowContactsTab") }
+  /// Show Wallet Tab
+  public static var generalSettingsShowWalletTab: String  { return L10n.tr("Localizable", "GeneralSettings.ShowWalletTab") }
   /// Show Icon in Menu Bar
   public static var generalSettingsStatusBarItem: String  { return L10n.tr("Localizable", "GeneralSettings.StatusBarItem") }
   /// CALL SETTINGS

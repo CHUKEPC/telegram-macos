@@ -354,6 +354,10 @@ public class TabBarView: View {
     }
 
     private func activate(index: Int) {
+        if let customAction = tabs[index].customAction {
+            customAction()
+            return
+        }
         if index == selectedIndex {
             delegate?.scrollup()
         } else {
@@ -363,6 +367,10 @@ public class TabBarView: View {
 
     func beginSelection(at point: NSPoint) {
         guard !isHidden, let index = itemLayout.index(at: point) else {
+            return
+        }
+        if let customAction = tabs[index].customAction {
+            customAction()
             return
         }
         finishGesture()
@@ -406,6 +414,11 @@ public class TabBarView: View {
         }
         let index = Int(gesture!.position.rounded())
         finishGesture()
+        if let customAction = tabs[index].customAction {
+            updateSelection(animated: true)
+            customAction()
+            return
+        }
         if index == selectedIndex {
             updateSelection(animated: true)
             delegate?.scrollup()

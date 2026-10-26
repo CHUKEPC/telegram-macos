@@ -36,6 +36,7 @@ private enum GeneralSettingsEntry : Comparable, Identifiable {
     case statusBar(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
     case showCallsTab(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
     case showContactsTab(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
+    case showWalletTab(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
     case enableRFTCopy(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
     case sendLargePhotos(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
     case acceptSecretChats(sectionId:Int, enabled: Bool, viewType: GeneralViewType)
@@ -72,6 +73,8 @@ private enum GeneralSettingsEntry : Comparable, Identifiable {
             return 9
         case .showContactsTab:
             return 901
+        case .showWalletTab:
+            return 902
         case .statusBar:
             return 10
         case .inAppSounds:
@@ -126,6 +129,8 @@ private enum GeneralSettingsEntry : Comparable, Identifiable {
         case let .showCallsTab(sectionId, _, _):
             return (sectionId * 1000) + stableId
         case let .showContactsTab(sectionId, _, _):
+            return (sectionId * 1000) + stableId
+        case let .showWalletTab(sectionId, _, _):
             return (sectionId * 1000) + stableId
         case let .enableRFTCopy(sectionId, _, _):
             return (sectionId * 1000) + stableId
@@ -203,6 +208,10 @@ private enum GeneralSettingsEntry : Comparable, Identifiable {
         case let .showContactsTab(sectionId: _, enabled: enabled, viewType):
             return  GeneralInteractedRowItem(initialSize, stableId: stableId, name: strings().generalSettingsShowContactsTab, type: .switchable(enabled), viewType: viewType, action: {
                 arguments.toggleContactsTab(!enabled)
+            })
+        case let .showWalletTab(sectionId: _, enabled: enabled, viewType):
+            return  GeneralInteractedRowItem(initialSize, stableId: stableId, name: strings().generalSettingsShowWalletTab, type: .switchable(enabled), viewType: viewType, action: {
+                arguments.toggleWalletTab(!enabled)
             })
         case let .enableRFTCopy(sectionId: _, enabled, viewType):
             return GeneralInteractedRowItem(initialSize, stableId: stableId, name: strings().generalSettingsCopyRTF, type: .switchable(enabled), viewType: viewType, action: {
@@ -293,6 +302,7 @@ private final class GeneralSettingsArguments {
     public let context:any AccountContextProtocol
     public let toggleCallsTab:(Bool) -> Void
     public let toggleContactsTab:(Bool) -> Void
+    public let toggleWalletTab:(Bool) -> Void
     public let toggleInAppKeys:(Bool) -> Void
     public let toggleInput:(SendingType)-> Void
     public let toggleSidebar:(Bool) -> Void
@@ -314,10 +324,11 @@ private final class GeneralSettingsArguments {
     public let toggleSpellingKey:(String)->Void
     public let showProfileId:()->Void
     public let togglePreviewChat:()->Void
-    public init(context:any AccountContextProtocol, toggleCallsTab:@escaping(Bool)-> Void, toggleContactsTab:@escaping(Bool)-> Void, toggleInAppKeys: @escaping(Bool) -> Void, toggleInput: @escaping(SendingType)-> Void, toggleSidebar: @escaping (Bool) -> Void, toggleInAppSounds: @escaping (Bool) -> Void, toggleEmojiReplacements:@escaping(Bool) -> Void, toggleForceTouchAction: @escaping(ForceTouchAction)->Void, toggleInstantViewScrollBySpace: @escaping(Bool)->Void, toggleAutoplayGifs:@escaping(Bool) -> Void, toggleEmojiPrediction: @escaping(Bool) -> Void, toggleBigEmoji: @escaping(Bool) -> Void, toggleStatusBar: @escaping(Bool) -> Void, toggleRTFEnabled: @escaping(Bool)->Void, toggleLargePhotos: @escaping(Bool) -> Void, acceptSecretChats: @escaping(Bool)->Void, toggleWorkMode:@escaping(Bool)->Void, openShortcuts: @escaping()->Void, callSettings: @escaping() ->Void, openLiteMode: @escaping()->Void, toggleSpellingKey:@escaping(String)->Void, showProfileId:@escaping()->Void, togglePreviewChat:@escaping()->Void) {
+    public init(context:any AccountContextProtocol, toggleCallsTab:@escaping(Bool)-> Void, toggleContactsTab:@escaping(Bool)-> Void, toggleWalletTab:@escaping(Bool)-> Void, toggleInAppKeys: @escaping(Bool) -> Void, toggleInput: @escaping(SendingType)-> Void, toggleSidebar: @escaping (Bool) -> Void, toggleInAppSounds: @escaping (Bool) -> Void, toggleEmojiReplacements:@escaping(Bool) -> Void, toggleForceTouchAction: @escaping(ForceTouchAction)->Void, toggleInstantViewScrollBySpace: @escaping(Bool)->Void, toggleAutoplayGifs:@escaping(Bool) -> Void, toggleEmojiPrediction: @escaping(Bool) -> Void, toggleBigEmoji: @escaping(Bool) -> Void, toggleStatusBar: @escaping(Bool) -> Void, toggleRTFEnabled: @escaping(Bool)->Void, toggleLargePhotos: @escaping(Bool) -> Void, acceptSecretChats: @escaping(Bool)->Void, toggleWorkMode:@escaping(Bool)->Void, openShortcuts: @escaping()->Void, callSettings: @escaping() ->Void, openLiteMode: @escaping()->Void, toggleSpellingKey:@escaping(String)->Void, showProfileId:@escaping()->Void, togglePreviewChat:@escaping()->Void) {
         self.context = context
         self.toggleCallsTab = toggleCallsTab
         self.toggleContactsTab = toggleContactsTab
+        self.toggleWalletTab = toggleWalletTab
         self.toggleInAppKeys = toggleInAppKeys
         self.toggleInput = toggleInput
         self.toggleSidebar = toggleSidebar
@@ -395,6 +406,7 @@ private func generalSettingsEntries(arguments:GeneralSettingsArguments, baseSett
     headerUnique -= 1
     entries.append(.showCallsTab(sectionId: sectionId, enabled: baseSettings.showCallsTab, viewType: .firstItem))
     entries.append(.showContactsTab(sectionId: sectionId, enabled: baseSettings.showContactsTab, viewType: .innerItem))
+    entries.append(.showWalletTab(sectionId: sectionId, enabled: baseSettings.showWalletTab, viewType: .innerItem))
     entries.append(.statusBar(sectionId: sectionId, enabled: baseSettings.statusBar, viewType: .innerItem))
     entries.append(.previewChats(sectionId: sectionId, enabled: additionalSettings.previewChats, viewType: .lastItem))
     entries.append(.previewChatsInfo(sectionId: sectionId))
@@ -493,6 +505,10 @@ open class GeneralSettingsViewController<Context: AccountContextProtocol>: Table
         }, toggleContactsTab: { enable in
             _ = updateBaseAppSettingsInteractively(accountManager: context.sharedContext.accountManager, { settings -> BaseApplicationSettings in
                 return settings.withUpdatedShowContactsTab(enable)
+            }).start()
+        }, toggleWalletTab: { enable in
+            _ = updateBaseAppSettingsInteractively(accountManager: context.sharedContext.accountManager, { settings -> BaseApplicationSettings in
+                return settings.withUpdatedShowWalletTab(enable)
             }).start()
         }, toggleInAppKeys: { enable in
             _ = updateBaseAppSettingsInteractively(accountManager: context.sharedContext.accountManager, { settings -> BaseApplicationSettings in

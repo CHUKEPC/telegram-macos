@@ -383,6 +383,7 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
     let contacts:NavigationViewController
     let settings:AccountViewController
     private let phoneCalls:RecentCallsViewController
+    private let walletDummyController: ViewController = ViewController()
     private let layoutDisposable:MetaDisposable = MetaDisposable()
     private let updateController: UpdateTabController
     private let connectingStatusView: ConnectingStatusView = ConnectingStatusView(frame: NSRect(origin: .zero, size: ConnectingStatusView.collapsedSize))
@@ -504,7 +505,12 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
         tabController.add(tab: TabBadgeItem(context, controller: navigation, image: theme.icons.tab_chats, selectedImage: theme.icons.tab_chats_active, longHoverHandler: { [weak self] control in
             self?.showFastChatSettings(control)
         }))
-        
+
+        let initialWalletIcon = walletIcon()
+        tabController.add(tab: TabItem(image: initialWalletIcon, selectedImage: initialWalletIcon, controller: walletDummyController, customAction: { [weak self] in
+            self?.openWalletModal()
+        }))
+
         tabController.add(tab: TabAllBadgeItem(context, image: theme.icons.tab_settings, selectedImage: theme.icons.tab_settings_active, controller: settings, longHoverHandler: { [weak self] control in
             self?.showFastSettings(control)
         }))
@@ -567,12 +573,59 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
         }
     }
 
+    private func walletIcon() -> CGImage {
+        if let image = NSImage(named: "Icon_SettingsMoney")?.copy() as? NSImage {
+            image.size = NSMakeSize(24, 24)
+            return image.precomposed()
+        }
+        return theme.icons.settingsWallet
+    }
+
+    private func showWalletTab() {
+        let icon = walletIcon()
+        let walletItem = TabItem(image: icon, selectedImage: icon, controller: walletDummyController, customAction: { [weak self] in
+            self?.openWalletModal()
+        })
+        let index = tabController.count - 1
+        tabController.insert(tab: walletItem, at: index)
+        previousIndex = tabController.selectedIndex
+        updateTabAccessibility()
+    }
+    private func hideWalletTab() {
+        if let index = tabController.findIndex(for: walletDummyController) {
+            tabController.remove(at: index)
+            previousIndex = tabController.selectedIndex
+        }
+    }
+
+    private var isOpeningWallet: Bool = false
+    private func openWalletModal() {
+        if isOpeningWallet || hasModals(context.window) {
+            return
+        }
+        isOpeningWallet = true
+        let context = self.context
+        let morphSource: () -> NSView? = { [weak self] in
+            guard let self else { return nil }
+            if let index = self.tabController.findIndex(for: self.walletDummyController) {
+                let control = self.tabController.control(for: index)
+                return control.subviews.first ?? control
+            }
+            return nil
+        }
+        showWallet(context: context, for: context.window, morphSource: morphSource)
+        Queue.mainQueue().after(0.5) { [weak self] in
+            self?.isOpeningWallet = false
+        }
+    }
+
     override var removeAfterDisapper: Bool {
         return false
     }
 
     private var showCallTabs: Bool = true
     private var showContactTabs: Bool = true
+    private var showWalletTabs: Bool = true
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -595,6 +648,14 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
                     self.showContactsTab()
                 } else {
                     self.hideContactsTab()
+                }
+            }
+            if settings.showWalletTab != self.showWalletTabs {
+                self.showWalletTabs = settings.showWalletTab
+                if self.showWalletTabs {
+                    self.showWalletTab()
+                } else {
+                    self.hideWalletTab()
                 }
             }
         }))
@@ -763,6 +824,11 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
 
             tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(theme.icons.tab_chats, theme.icons.tab_chats_active), at: index)
             index += 1
+            if showWalletTabs {
+                let icon = walletIcon()
+                tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(icon, icon), at: index)
+                index += 1
+            }
             tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(theme.icons.tab_settings, theme.icons.tab_settings_active), at: index)
         }
         self.previousTheme = theme
@@ -778,6 +844,8 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
                 title = strings().contactsContacsSeparator
             } else if tab.controller === phoneCalls {
                 title = strings().telegramLayoutRecentCallsViewController
+            } else if tab.controller === walletDummyController {
+                title = strings().accountViewControllerMoney
             } else if tab.controller === settings {
                 title = strings().telegramLayoutAccountController
             } else {
@@ -945,7 +1013,10 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
     }
 
     var settingsIndex: Int {
-        return chatIndex + 1
+        if let index = tabController.findIndex(for: settings) {
+            return index
+        }
+        return chatIndex + (showWalletTabs ? 2 : 1)
     }
 
 
