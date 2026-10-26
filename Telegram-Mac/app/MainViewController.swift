@@ -542,27 +542,43 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
         settings.loadViewIfNeeded(bounds)
     }
 
+    private func showContactsTab() {
+        tabController.insert(tab: TabAnimatedItem(.tab_contacts, image: theme.icons.tab_contacts, selectedImage: theme.icons.tab_contacts_active, controller: contacts), at: 0)
+        previousIndex = tabController.selectedIndex
+        updateTabAccessibility()
+    }
+    private func hideContactsTab() {
+        if let index = tabController.findIndex(for: contacts) {
+            tabController.remove(at: index)
+            previousIndex = tabController.selectedIndex
+        }
+    }
+
     private func showCallsTab() {
-        tabController.insert(tab: TabAnimatedItem(.tab_calls, image: theme.icons.tab_calls, selectedImage: theme.icons.tab_calls_active, controller: phoneCalls), at: 1)
+        let index = showContactTabs ? 1 : 0
+        tabController.insert(tab: TabAnimatedItem(.tab_calls, image: theme.icons.tab_calls, selectedImage: theme.icons.tab_calls_active, controller: phoneCalls), at: index)
         previousIndex = tabController.selectedIndex
         updateTabAccessibility()
     }
     private func hideCallsTab() {
-        tabController.remove(at: 1)
-        previousIndex = tabController.selectedIndex
+        if let index = tabController.findIndex(for: phoneCalls) {
+            tabController.remove(at: index)
+            previousIndex = tabController.selectedIndex
+        }
     }
-    
+
     override var removeAfterDisapper: Bool {
         return false
     }
-    
+
     private var showCallTabs: Bool = true
-    
+    private var showContactTabs: Bool = true
+
     override func viewDidLoad() {
         super.viewDidLoad()
-                
+
         tabController.navigationController = navigation
-                
+
         prefDisposable.set((baseAppSettings(accountManager: context.sharedContext.accountManager) |> deliverOnMainQueue).start(next: { [weak self] settings in
             guard let `self` = self else {return}
             if settings.showCallsTab != self.showCallTabs {
@@ -571,6 +587,14 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
                     self.showCallsTab()
                 } else {
                     self.hideCallsTab()
+                }
+            }
+            if settings.showContactsTab != self.showContactTabs {
+                self.showContactTabs = settings.showContactsTab
+                if self.showContactTabs {
+                    self.showContactsTab()
+                } else {
+                    self.hideContactsTab()
                 }
             }
         }))
@@ -728,13 +752,15 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
     private func updateTabsIfNeeded() {
         if !tabController.isEmpty && (previousTheme?.colors != theme.colors ||  previousIconColor != theme.colors.accentIcon) {
             var index: Int = 0
-            tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(theme.icons.tab_contacts, theme.icons.tab_contacts_active), at: index)
-            index += 1
+            if showContactTabs {
+                tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(theme.icons.tab_contacts, theme.icons.tab_contacts_active), at: index)
+                index += 1
+            }
             if showCallTabs {
                 tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(theme.icons.tab_calls, theme.icons.tab_calls_active), at: index)
                 index += 1
             }
-            
+
             tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(theme.icons.tab_chats, theme.icons.tab_chats_active), at: index)
             index += 1
             tabController.replace(tab: tabController.tab(at: index).withUpdatedImages(theme.icons.tab_settings, theme.icons.tab_settings_active), at: index)
@@ -908,18 +934,21 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
     }
     
     var chatIndex: Int {
-        if showCallTabs {
-            return 2
-        } else {
-            return 1
+        var index = 0
+        if showContactTabs {
+            index += 1
         }
+        if showCallTabs {
+            index += 1
+        }
+        return index
     }
-    
+
     var settingsIndex: Int {
         return chatIndex + 1
     }
-    
-    
+
+
     func openChat(_ index: Int, force: Bool = false) {
         if self.tabController.current == navigation {
             let controller = navigation.controller
@@ -947,7 +976,9 @@ class MainViewController: TelegramGenericViewController<MainController_View> {
                 if self.context.layout == .single {
                     self.navigationController?.close()
                 }
-                self.tabController.select(index: 1)
+                if let index = tabController.findIndex(for: phoneCalls) {
+                    self.tabController.select(index: index)
+                }
             }
         }
     }

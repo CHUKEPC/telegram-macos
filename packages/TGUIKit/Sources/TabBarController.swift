@@ -197,6 +197,19 @@ public class TabBarController: ViewController, TabViewDelegate {
     public func remove(at index: Int) -> Void {
         genericView.tabView.removeTab(at: index)
     }
+    public func findIndex(for controller: ViewController) -> Int? {
+        var foundIndex: Int?
+        var index = 0
+        genericView.tabView.enumerateItems { item in
+            if item.controller === controller {
+                foundIndex = index
+                return true
+            }
+            index += 1
+            return false
+        }
+        return foundIndex
+    }
     public var isEmpty:Bool {
         return genericView.tabView.isEmpty
     }
