@@ -1269,7 +1269,8 @@ public class ChatControllerView : View, ChatInputDelegate {
             } else if let pinnedMessageId = interfaceState.pinnedMessageId, !interfaceState.interfaceState.dismissedPinnedMessageId.contains(pinnedMessageId.messageId), !interfaceState.hidePinnedMessage, interfaceState.chatMode != .pinned {
                 
                 let translation: ChatLiveTranslateContext.State.Result?
-                if let translate = interfaceState.translateState {
+                if let translate = interfaceState.translateState, translate.canTranslate, translate.translate,
+                   let message = pinnedMessageId.message, canTranslateChatMessage(message, accountPeerId: chatInteraction.interactionContext.peerId, toLang: translate.to) {
                     translation = translate.result[.Key(id: pinnedMessageId.messageId, toLang: translate.to)]
                 } else {
                     translation = nil
@@ -1287,7 +1288,8 @@ public class ChatControllerView : View, ChatInputDelegate {
             if pinnedMessageId.message?.restrictedText(chatInteraction.interactionContext.contentSettings) == nil {
                 
                 let translation: ChatLiveTranslateContext.State.Result?
-                if let translate = interfaceState.translateState {
+                if let translate = interfaceState.translateState, translate.canTranslate, translate.translate,
+                   let message = pinnedMessageId.message, canTranslateChatMessage(message, accountPeerId: chatInteraction.interactionContext.peerId, toLang: translate.to) {
                     translation = translate.result[.Key(id: pinnedMessageId.messageId, toLang: translate.to)]
                 } else {
                     translation = nil
