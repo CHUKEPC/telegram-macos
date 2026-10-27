@@ -305,11 +305,13 @@ class ServiceEventLogItem: TableRowItem {
     fileprivate let peerId: PeerId
     fileprivate let group: [ChannelAdminEventLogEntry]
     fileprivate let groupRevealed: Bool
+    private let toggleGroup: () -> Void
     init(_ initialSize: NSSize, entry: ChannelAdminEventLogEntry, isGroup: Bool, chatInteraction: ChatInteraction, group:[ChannelAdminEventLogEntry] = [], groupRevealed: Bool = false, toggleGroup:@escaping()->Void) {
         self.entry = entry
         self.isGroup = isGroup
         self.group = group
         self.groupRevealed = groupRevealed
+        self.toggleGroup = toggleGroup
         self.peerId = chatInteraction.peerId
         self.chatInteraction = chatInteraction
         let attributedString = NSMutableAttributedString()
@@ -923,6 +925,45 @@ class ServiceEventLogItem: TableRowItem {
         textLayout = TextViewLayout(attributedString, alignment: .center)
         textLayout.interactions = LinkHooks.shared.globalLinkExecutor()
         super.init(initialSize)
+
+        var layouts = [textLayout]
+        if let content = contentMessageItem {
+            layouts += [content.name, content.date, content.content]
+            if let panel = content.panel {
+                layouts += [panel.header, panel.content]
+            }
+        }
+        for layout in layouts {
+            layout.interactions.menuItems = { [weak self, weak layout] linkType in
+                guard let self = self, let layout = layout else { return .single([]) }
+                let text = layout.attributedString
+                let range = layout.selectedRange.range
+                var selectedText = text
+                var resolvedLink: String?
+                if range.location != NSNotFound, range.location >= 0, range.location < text.length, range.length >= 0, range.length <= text.length - range.location {
+                    selectedText = text.attributedSubstring(from: range)
+                    if linkType != nil, let link = text.attribute(.link, at: range.location, effectiveRange: nil) {
+                        resolvedLink = layout.interactions.resolveLink(link)
+                    }
+                }
+                let copyTitle = linkType.map { layout.interactions.localizeLinkCopy($0) } ?? strings().chatContextCopyText
+                let interactions = layout.interactions
+                let copyItem = ContextMenuItem(copyTitle, handler: {
+                    if let resolvedLink = resolvedLink {
+                        copyToClipboard(resolvedLink)
+                    } else if interactions.copy?() != true, !interactions.copyAttributedString(selectedText) {
+                        copyToClipboard(selectedText.string)
+                    }
+                }, itemImage: TextView.context_copy_animation)
+                var textItems = [copyItem]
+                if resolvedLink == nil, let translate = interactions.translate?(selectedText.string, self.chatInteraction.interactionContext.window) {
+                    textItems.append(translate)
+                }
+                return self.menuItems(in: .zero) |> map { items in
+                    return textItems + (items.isEmpty ? [] : [ContextSeparatorItem()] + items)
+                }
+            }
+        }
     }
     
     override var stableId: AnyHashable {
@@ -948,17 +989,13 @@ class ServiceEventLogItem: TableRowItem {
         switch entry.event.action {
         case .deleteMessage:
             targetPeers = getGroupPeers(self.group)
-        case .participantJoin, .participantJoinedViaInvite, .participantJoinByRequest, .participantLeave:
-            if let peer = entry.peers[entry.event.peerId] {
-                targetPeers = [peer]
-            }
-        case let .participantToggleBan(prev, new):
+        case let .participantToggleBan(_, new):
             targetPeers = [new.peer._asPeer()]
-        case let .participantToggleAdmin(prev, new):
+        case let .participantToggleAdmin(_, new):
             targetPeers = [new.peer._asPeer()]
         case let .participantInvite(participant):
             targetPeers = [participant.peer._asPeer()]
-        case let .editMessage(prev, new):
+        case let .editMessage(_, new):
             if let author = new.author {
                 targetPeers = [author]
             }
@@ -977,34 +1014,30 @@ class ServiceEventLogItem: TableRowItem {
             return .single([])
         }
 
-        var items: [ContextMenuItem] = []
-        for target in targetPeers {
-            let restrictTitle: String
-            let banTitle: String
-            if targetPeers.count == 1 {
-                restrictTitle = strings().chatContextRestrict
-                banTitle = strings().chatContextBan
-            } else {
-                restrictTitle = "\(strings().chatContextRestrict) - \(target.compactDisplayTitle)"
-                banTitle = "\(strings().chatContextBan) - \(target.compactDisplayTitle)"
+        let visiblePeers = Array(targetPeers.prefix(10))
+        let showMessages = targetPeers.count > visiblePeers.count && !groupRevealed
+        let showMessagesTitle = strings().eventLogServiceShowMoreOther(group.count - 1)
+        let toggleGroup = self.toggleGroup
+        return combineLatest(visiblePeers.map { target in
+            return ChannelAdminUIHooks.shared.participantModerationMenuItems(context, peerId, target, true)
+        }) |> deliverOnMainQueue |> map { menus in
+            var items: [ContextMenuItem] = []
+            for (target, actions) in zip(visiblePeers, menus) where !actions.isEmpty {
+                if targetPeers.count == 1 {
+                    items += actions
+                } else {
+                    let item = ContextMenuItem(target.compactDisplayTitle)
+                    let submenu = ContextMenu()
+                    submenu.items = actions
+                    item.submenu = submenu
+                    items.append(item)
+                }
             }
-
-            items.append(ContextMenuItem(restrictTitle, handler: {
-                _ = showModalProgress(signal: context.engine.peers.fetchChannelParticipant(peerId: peerId, participantId: target.id), for: context.window).start(next: { participant in
-                    showModal(with: ChatHistoryUIHooks.shared.makeRestrictedModalController(context, peerId, target.id, participant, { updatedRights in
-                        _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: target.id, bannedRights: updatedRights).startStandalone()
-                        _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
-                    }), for: context.window)
-                })
-            }))
-
-            items.append(ContextMenuItem(banTitle, handler: {
-                _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: target.id, bannedRights: TelegramChatBannedRights(flags: [.banReadMessages], untilDate: Int32.max)).startStandalone()
-                _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
-            }, itemMode: .destruct))
+            if showMessages {
+                items.append(ContextMenuItem(showMessagesTitle, handler: toggleGroup))
+            }
+            return items
         }
-
-        return .single(items)
     }
 }
 

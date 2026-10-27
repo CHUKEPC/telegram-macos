@@ -340,7 +340,14 @@ public func chatMenuItems(for message: Message, entry: ChatHistoryEntry?, textLa
         return .complete()
     }
 
-    return chatMenuItemsData(for: message, textLayout: textLayout, entry: entry, chatInteraction: chatInteraction, source: source) |> map { [chatInteraction] data in
+    let moderationItems: Signal<[ContextMenuItem], NoError>
+    if chatInteraction.isLogInteraction, let author = message.author ?? message.effectiveAuthor {
+        moderationItems = ChatHistoryUIHooks.shared.participantModerationMenuItems(chatInteraction.interactionContext, chatInteraction.peerId, author, true)
+    } else {
+        moderationItems = .single([])
+    }
+
+    return combineLatest(queue: .mainQueue(), chatMenuItemsData(for: message, textLayout: textLayout, entry: entry, chatInteraction: chatInteraction, source: source), moderationItems) |> map { [chatInteraction] data, moderationItems in
         
         let peer = data.message.peers[data.message.id.peerId]
         let isNotFailed = !message.flags.contains(.Failed) && !message.flags.contains(.Unsent) && !data.message.flags.contains(.Sending)
@@ -1471,27 +1478,7 @@ public func chatMenuItems(for message: Message, entry: ChatHistoryEntry?, textLa
                         
             fifthBlock.append(reportItem)
         }
-        let channelPeer = (data.peer as? TelegramChannel) ?? (data.chatInteraction.peer as? TelegramChannel)
-        if let channelPeer = channelPeer, !channelPeer.isChannel, channelPeer.hasPermission(.banMembers) {
-            if let author = data.message.author ?? data.message.effectiveAuthor, author.id != context.peerId, author.isUser || author.isBot {
-                let channelId = channelPeer.id
-                fifthBlock.append(ContextMenuItem(strings().chatContextRestrict, handler: {
-                    _ = showModalProgress(signal: context.engine.peers.fetchChannelParticipant(peerId: channelId, participantId: author.id), for: context.window).start(next: { participant in
-                        showModal(with: ChatHistoryUIHooks.shared.makeRestrictedModalController(context, channelId, author.id, participant, { updatedRights in
-                            _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: channelId, memberId: author.id, bannedRights: updatedRights).startStandalone()
-                            _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
-                        }), for: context.window)
-                    })
-                }, itemImage: MenuAnimation.menu_restrict.value))
-
-                if data.isLogInteraction {
-                    fifthBlock.append(ContextMenuItem(strings().chatContextBan, handler: {
-                        _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: channelId, memberId: author.id, bannedRights: TelegramChatBannedRights(flags: [.banReadMessages], untilDate: Int32.max)).startStandalone()
-                        _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
-                    }, itemMode: .destruct, itemImage: MenuAnimation.menu_ban.value))
-                }
-            }
-        }
+        fifthBlock.append(contentsOf: moderationItems)
         
         if data.updatingMessageMedia[messageId] != nil {
             fifthBlock.append(ContextMenuItem(strings().chatContextCancelEditing, handler: {
