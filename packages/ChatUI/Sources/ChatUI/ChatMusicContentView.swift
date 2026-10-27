@@ -28,29 +28,28 @@ public class ChatMusicContentView: ChatAudioContentView {
 
     public override var fetchStatus: MediaResourceStatus? {
         didSet {
-            if let fetchStatus = fetchStatus {
-                let presentation: ChatMediaPresentation = parameters?.presentation ?? .Empty
-                switch fetchStatus {
-                case let .Fetching(_, progress), let .Paused(progress):
-                    if let _ = parameters {
-                        progressView.theme = RadialProgressTheme(backgroundColor: presentation.activityBackground, foregroundColor: presentation.activityForeground, icon: nil, blendMode: presentation.blendingMode)
-                    }
-                    let sentGrouped = parent?.groupingKey != nil && (parent!.flags.contains(.Sending) || parent!.flags.contains(.Unsent))
-                    if progress == 1.0, sentGrouped {
-                        progressView.setState(.Success, animated: statusChangeIsAnimatable)
-                    } else {
-                        progressView.setState(.Fetching(progress: progress, force: false), animated: statusChangeIsAnimatable)
-                    }
-                    progressView.isHidden = false
-                    imageView.isHidden = true
-                case .Remote:
-                    progressView.isHidden = true
-                    imageView.isHidden = false
-                case .Local:
-                    progressView.isHidden = true
-                    imageView.isHidden = false
-                }
-            }
+            updateFetchPresentation()
+        }
+    }
+
+    private func updateFetchPresentation() {
+        let presentation: ChatMediaPresentation = parameters?.presentation ?? .Empty
+        switch fetchStatus {
+        case .Fetching?, .Paused?:
+            progressView.theme = RadialProgressTheme(backgroundColor: presentation.activityBackground, foregroundColor: presentation.activityForeground, icon: nil, blendMode: presentation.blendingMode)
+            progressView.isHidden = false
+            imageView.isHidden = true
+        default:
+            progressView.isHidden = true
+            imageView.isHidden = false
+        }
+    }
+
+    public override func executeInteraction(_ isControl: Bool) {
+        if !isControl, userInteractionEnabled, parent?.flags.contains(.Unsent) != true || parent?.flags.contains(.Failed) == true {
+            open()
+        } else {
+            super.executeInteraction(isControl)
         }
     }
     
@@ -75,18 +74,18 @@ public class ChatMusicContentView: ChatAudioContentView {
     public override func update(with media: Media, size: NSSize, context: any AccountContextProtocol, parent: Message?, table: TableView?, parameters: ChatMediaLayoutParameters?, animated: Bool, positionFlags: LayoutPositionFlags? = nil, approximateSynchronousValue: Bool = false) {
         super.update(with: media, size: size, context: context, parent: parent, table: table, parameters: parameters, animated: animated, positionFlags: positionFlags)
 
-        let presentation: ChatMediaPresentation = parameters?.presentation ?? .Empty
-        if let fetchStatus = fetchStatus {
-            switch fetchStatus {
-            case .Fetching, .Paused:
-                progressView.theme = RadialProgressTheme(backgroundColor: presentation.activityBackground, foregroundColor: presentation.activityForeground, icon: nil, blendMode: presentation.blendingMode)
-                progressView.isHidden = false
-                imageView.isHidden = true
-            case .Remote, .Local:
-                progressView.isHidden = true
-                imageView.isHidden = false
+        if let file = media as? TelegramMediaFile, parent?.flags.contains(.Unsent) != true || parent?.flags.contains(.Failed) == true {
+            let status: Signal<MediaResourceStatus, NoError>
+            if let parent = parent {
+                status = chatMessageFileStatus(context: context, message: parent, file: file, approximateSynchronousValue: approximateSynchronousValue)
+            } else {
+                status = context.account.postbox.mediaBox.resourceStatus(file.resource)
             }
+            self.statusDisposable.set((status |> deliverOnMainQueue).start(next: { [weak self] status in
+                self?.fetchStatus = status
+            }))
         }
+        updateFetchPresentation()
 
         if let parameters = parameters as? ChatMediaMusicLayoutParameters {
             textView.update(parameters.nameLayout)
