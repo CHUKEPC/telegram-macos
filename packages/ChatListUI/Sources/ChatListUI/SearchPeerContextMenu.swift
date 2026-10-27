@@ -1,0 +1,178 @@
+import Cocoa
+import TGUIKit
+import Postbox
+import SwiftSignalKit
+import TelegramCore
+import TelegramContext
+import TelegramTheme
+import TelegramUtils
+import Localization
+import LocalAnimations
+import InputDataUI
+import InAppSettings
+
+struct SearchPeerMenuState {
+    let canOpenProfile: Bool
+    let canManageChat: Bool
+    let canMarkUnread: Bool
+    let canPin: Bool
+    var isUnread: Bool
+    let isMuted: Bool
+    let isPinned: Bool
+}
+
+struct SearchPeerMenuActions {
+    let openProfile: () -> Void
+    let markRead: (Bool) -> Void
+    let mute: (Int32) -> Void
+    let muteUntil: () -> Void
+    let togglePin: () -> Void
+}
+
+func searchPeerMenuItems(state: SearchPeerMenuState, profileTitle: String, actions: SearchPeerMenuActions, folders: [ContextMenuItem], remove: ContextMenuItem?) -> [ContextMenuItem] {
+    var items: [ContextMenuItem] = []
+    if state.canOpenProfile {
+        items.append(ContextMenuItem(profileTitle, handler: actions.openProfile, itemImage: MenuAnimation.menu_open_profile.value))
+    }
+    if state.canManageChat {
+        if state.isUnread || state.canMarkUnread {
+            items.append(ContextMenuItem(state.isUnread ? strings().chatListContextMaskAsRead : strings().chatListContextMaskAsUnread, handler: {
+                actions.markRead(state.isUnread)
+            }, itemImage: state.isUnread ? MenuAnimation.menu_read.value : MenuAnimation.menu_unread.value))
+        }
+        let muteItem = ContextMenuItem(state.isMuted ? strings().chatListContextUnmute : strings().chatListContextMute, handler: {
+            actions.mute(state.isMuted ? 0 : Int32.max)
+        }, itemImage: state.isMuted ? MenuAnimation.menu_unmuted.value : MenuAnimation.menu_mute.value)
+        if !state.isMuted {
+            let menu = ContextMenu()
+            menu.items = [
+                ContextMenuItem(strings().chatListMute1Hour, handler: { actions.mute(60 * 60) }, itemImage: MenuAnimation.menu_mute_for_1_hour.value),
+                ContextMenuItem(strings().chatListMute8Hours, handler: { actions.mute(60 * 60 * 8) }, itemImage: MenuAnimation.menu_mute_for_1_hour.value),
+                ContextMenuItem(strings().chatListMute3Days, handler: { actions.mute(60 * 60 * 24 * 3) }, itemImage: MenuAnimation.menu_mute_for_2_days.value),
+                ContextSeparatorItem(),
+                ContextMenuItem(strings().chatListMuteUntil, handler: actions.muteUntil, itemImage: MenuAnimation.menu_schedule_message.value),
+                ContextMenuItem(strings().chatListMuteForever, handler: { actions.mute(Int32.max) }, itemImage: MenuAnimation.menu_mute.value)
+            ]
+            muteItem.submenu = menu
+        }
+        items.append(muteItem)
+    }
+    if state.canPin || !folders.isEmpty {
+        if !items.isEmpty {
+            items.append(ContextSeparatorItem())
+        }
+        if state.canPin {
+            items.append(ContextMenuItem(state.isPinned ? strings().chatListContextUnpin : strings().chatListContextPin, handler: actions.togglePin, itemImage: state.isPinned ? MenuAnimation.menu_unpin.value : MenuAnimation.menu_pin.value))
+        }
+        if !folders.isEmpty {
+            let item = ContextMenuItem(strings().chatListFilterAddToFolder, itemImage: MenuAnimation.menu_add_to_folder.value)
+            let submenu = ContextMenu()
+            submenu.items = folders
+            item.submenu = submenu
+            items.append(item)
+        }
+    }
+    if let remove {
+        if !items.isEmpty {
+            items.append(ContextSeparatorItem())
+        }
+        items.append(remove)
+    }
+    return items
+}
+
+func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol, chatPeerId: PeerId? = nil, isRecent: Bool = false, remove: ContextMenuItem? = nil) -> Signal<[ContextMenuItem], NoError> {
+    guard !context.isFrozen else {
+        return .single(remove.map { [$0] } ?? [])
+    }
+    let peerId = chatPeerId ?? peer.id
+    let snapshot = context.account.postbox.transaction { transaction -> (Peer, SearchPeerMenuState, EngineChatList.Group, PeerId) in
+        let currentPeer = transaction.getPeer(peer.id) ?? peer
+        let chatPeer = transaction.getPeer(peerId) ?? currentPeer
+        let chatIndex = transaction.getPeerChatListIndex(peerId)
+        let notificationPeerId = chatPeer.notificationSettingsPeerId ?? chatPeer.associatedPeerId ?? peerId
+        let settings = transaction.getPeerNotificationSettings(id: notificationPeerId)
+        let isMuted: Bool
+        if let settings = settings as? TelegramPeerNotificationSettings, case let .muted(until) = settings.muteState {
+            isMuted = until > context.timestamp
+        } else {
+            isMuted = resolvedIsRemovedFromTotalUnreadCount(globalSettings: transaction.getGlobalNotificationSettings(), peer: chatPeer, peerSettings: settings)
+        }
+        let readState = transaction.getCombinedPeerReadState(peerId)
+        let displayAsRegularChat = (chatPeer as? TelegramChannel)?.flags.contains(.displayForumAsTabs) == true || (transaction.getPeerCachedData(peerId: peerId) as? CachedChannelData)?.viewForumAsMessages.knownValue == true
+        let canMarkUnread = peerId.namespace != Namespaces.Peer.SecretChat && (!chatPeer.isForumOrMonoForum || displayAsRegularChat)
+        let isSelf = peerId == context.peerId
+        let state = SearchPeerMenuState(
+            canOpenProfile: !isSelf,
+            canManageChat: !isSelf && chatIndex != nil,
+            canMarkUnread: canMarkUnread,
+            canPin: isRecent,
+            isUnread: readState?.isUnread ?? false,
+            isMuted: isMuted,
+            isPinned: chatIndex?.1.pinningIndex != nil
+        )
+        return (currentPeer, state, chatIndex.map { EngineChatList.Group($0.0) } ?? .root, notificationPeerId)
+    }
+    let readCounters = context.engine.data.get(TelegramEngine.EngineData.Item.Messages.PeerReadCounters(id: peerId))
+    return combineLatest(snapshot, chatListFilterPreferences(engine: context.engine) |> take(1), readCounters)
+    |> deliverOnMainQueue
+    |> map { snapshot, filters, readCounters in
+        let (peer, snapshotState, group, notificationPeerId) = snapshot
+        var state = snapshotState
+        state.isUnread = state.isUnread || readCounters.isUnread
+        let storePeer = context.account.postbox.transaction { transaction -> Void in
+            if transaction.getPeer(peer.id) == nil {
+                updatePeersCustom(transaction: transaction, peers: [peer], update: { _, updated in updated })
+            }
+        } |> deliverOnMainQueue
+        let actions = SearchPeerMenuActions(openProfile: {
+            _ = storePeer.start(completed: {
+                ChatListUIHooks.shared.pushPeerInfo(context.bindings.rootNavigation(), context, peer.id)
+            })
+        }, markRead: { read in
+            if read {
+                ChatListRowItem.markAsRead(context: context, peerId: peerId)
+            } else {
+                ChatListRowItem.markAsUnread(context: context, peerId: peerId)
+            }
+        }, mute: { interval in
+            _ = context.engine.peers.updatePeerMuteSetting(peerId: notificationPeerId, threadId: nil, muteInterval: interval).start()
+        }, muteUntil: {
+            FeatureNavigationHooks.shared.selectDate(context, context.window, nil, nil, .date(title: strings().chatListMuteUntilTitle, doneTitle: strings().chatListMuteUntilOK), { date, _ in
+                let interval = Int32(clamping: Int64(max(0, date.timeIntervalSince1970 - Date().timeIntervalSince1970)))
+                _ = context.engine.peers.updatePeerMuteSetting(peerId: notificationPeerId, threadId: nil, muteInterval: interval).start()
+            })
+        }, togglePin: {
+            _ = storePeer.start(completed: {
+                ChatListRowItem.togglePinned(context: context, peerId: peerId, isPinned: state.isPinned, mode: .chat, filter: .allChats, associatedGroupId: group)
+            })
+        })
+        var folders: [ContextMenuItem] = []
+        if peerId.namespace != Namespaces.Peer.SecretChat {
+            for filter in filters.list {
+                guard let data = filter.data else { continue }
+                let filterId = ChatListUIHooks.shared.chatListFilterId(filter)
+                folders.append(ContextMenuItem(filter.title, handler: {
+                    _ = (storePeer |> mapToSignal { _ in context.engine.peers.updateChatListFiltersInteractively { list in
+                        var list = list
+                        for (index, folder) in list.enumerated() {
+                            if ChatListUIHooks.shared.chatListFilterId(folder) == filterId, var data = folder.data {
+                                if data.includePeers.peers.contains(peerId) {
+                                    var peers = data.includePeers.peers
+                                    peers.removeAll(where: { $0 == peerId })
+                                    data.includePeers.setPeers(peers)
+                                } else {
+                                    data.excludePeers.removeAll(where: { $0 == peerId })
+                                    data.includePeers.setPeers(data.includePeers.peers + [peerId])
+                                }
+                                list[index] = folder.withUpdatedData(data)
+                            }
+                        }
+                        return list
+                    } }).start()
+                }, state: data.includePeers.peers.contains(peerId) ? .on : nil))
+            }
+        }
+        return searchPeerMenuItems(state: state, profileTitle: peer is TelegramUser ? strings().exportedInvitationContextOpenProfile : strings().chatContextPeerOpenInfo, actions: actions, folders: folders, remove: remove)
+    }
+}
