@@ -750,15 +750,9 @@ class ChatTitleBarView: TitledBarView, InteractionContentViewProtocol {
                             .withUpdatedStatus(strings().peerInfoTopicStatusIn(peer.displayTitle))
                     }
                 case .savedMessages:
-                    if let count = self.counters.replies, count > 0 {
-                        result = result
-                            .withUpdatedTitle(peer.displayTitle)
-                            .withUpdatedStatus(strings().chatTitleTopicOther(Int(count)))
-                    } else {
-                        result = result
-                            .withUpdatedTitle(presentation.threadInfo?.info.title ?? "")
-                            .withUpdatedStatus(strings().peerInfoTopicStatusIn(peer.displayTitle))
-                    }
+                    result = result
+                        .withUpdatedTitle(peer.displayTitle)
+                        .withUpdatedStatus(strings().sharedMediaSavedCountOther(Int(self.counters.replies ?? 0)))
                     if PeerId(data.threadId) == chatInteraction.interactionContext.peerId {
                         result = result.withUpdatedTitle(strings().peerMyNotes)
                     }
