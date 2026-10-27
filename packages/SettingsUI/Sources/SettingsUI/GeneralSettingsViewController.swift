@@ -206,11 +206,13 @@ private enum GeneralSettingsEntry : Comparable, Identifiable {
                 arguments.toggleCallsTab(!enabled)
             })
         case let .showContactsTab(sectionId: _, enabled: enabled, viewType):
-            return  GeneralInteractedRowItem(initialSize, stableId: stableId, name: strings().generalSettingsShowContactsTab, type: .switchable(enabled), viewType: viewType, action: {
+            //TODOLANG
+            return  GeneralInteractedRowItem(initialSize, stableId: stableId, name: "Show Contacts Tab", type: .switchable(enabled), viewType: viewType, action: {
                 arguments.toggleContactsTab(!enabled)
             })
         case let .showWalletTab(sectionId: _, enabled: enabled, viewType):
-            return  GeneralInteractedRowItem(initialSize, stableId: stableId, name: strings().generalSettingsShowWalletTab, type: .switchable(enabled), viewType: viewType, action: {
+            //TODOLANG
+            return  GeneralInteractedRowItem(initialSize, stableId: stableId, name: "Show Wallet Tab", type: .switchable(enabled), viewType: viewType, action: {
                 arguments.toggleWalletTab(!enabled)
             })
         case let .enableRFTCopy(sectionId: _, enabled, viewType):
