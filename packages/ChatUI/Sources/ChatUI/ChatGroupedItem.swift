@@ -406,9 +406,6 @@ public class ChatGroupedItem: ChatRowItem {
                 let value = parameter.makeLabelsForWidth(min(width, 360))
                 _width = max(_width, value)
             }
-            for parameter in parameters {
-                _ = parameter.makeLabelsForWidth(_width)
-            }
         case .photoOrVideo:
             _width = min(width, 360)
         }
