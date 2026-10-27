@@ -3496,6 +3496,8 @@ public final class L10n {
   public static var chatContextReturnMessageFee: String  { return L10n.tr("Localizable", "Chat.Context.ReturnMessageFee") }
   /// Save As...
   public static var chatContextSaveMedia: String  { return L10n.tr("Localizable", "Chat.Context.SaveMedia") }
+  public static var chatContextSaveSelectedPhotos: String  { return L10n.tr("Localizable", "Chat.Context.SaveSelectedPhotos") }
+  public static var chatContextSaveAllPhotos: String  { return L10n.tr("Localizable", "Chat.Context.SaveAllPhotos") }
   /// Shared Media
   public static var chatContextSharedMedia: String  { return L10n.tr("Localizable", "Chat.Context.SharedMedia") }
   /// Summarize
@@ -9062,10 +9064,6 @@ public final class L10n {
   public static var generalSettingsShowArticlesInSearch: String  { return L10n.tr("Localizable", "GeneralSettings.ShowArticlesInSearch") }
   /// Show Calls Tab
   public static var generalSettingsShowCallsTab: String  { return L10n.tr("Localizable", "GeneralSettings.ShowCallsTab") }
-  /// Show Contacts Tab
-  public static var generalSettingsShowContactsTab: String  { return L10n.tr("Localizable", "GeneralSettings.ShowContactsTab") }
-  /// Show Wallet Tab
-  public static var generalSettingsShowWalletTab: String  { return L10n.tr("Localizable", "GeneralSettings.ShowWalletTab") }
   /// Show Icon in Menu Bar
   public static var generalSettingsStatusBarItem: String  { return L10n.tr("Localizable", "GeneralSettings.StatusBarItem") }
   /// CALL SETTINGS
