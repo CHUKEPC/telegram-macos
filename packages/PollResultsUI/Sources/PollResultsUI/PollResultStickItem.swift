@@ -27,13 +27,16 @@ public class PollResultStickItem: TableStickItem {
     public let collapse: (()->Void)?
     public let _stableId: AnyHashable
     public let context: (any AccountContextProtocol)?
-    public init(_ initialSize:NSSize, stableId: AnyHashable, left: NSAttributedString, context: any AccountContextProtocol, additionText: String, right: String, collapse: (()->Void)?, viewType: GeneralViewType) {
+    public let canCopy: Bool
+    public init(_ initialSize:NSSize, stableId: AnyHashable, left: NSAttributedString, context: any AccountContextProtocol, additionText: String, right: String, collapse: (()->Void)?, viewType: GeneralViewType, canCopy: Bool) {
+        self.canCopy = canCopy
         self.viewType = viewType
         self._stableId = stableId
         self.context = context
         self.inset = NSEdgeInsets(left: 20, right: 20)
         self.collapse = collapse
-        self.leftLayout = TextViewLayout(left, maximumNumberOfLines: 1, truncationType: .end)
+        self.leftLayout = TextViewLayout(left, maximumNumberOfLines: 1, truncationType: .end, mayItems: canCopy)
+        self.leftLayout.interactions.copy = { !canCopy }
         self.leftAdditionLayout = TextViewLayout(.initialize(string: additionText, color: theme.colors.listGrayText, font: .normal(11.5)), maximumNumberOfLines: 1, truncationType: .end)
 
         if let collapse = collapse {
@@ -62,6 +65,7 @@ public class PollResultStickItem: TableStickItem {
     }
 
     public override func menuItems(in location: NSPoint) -> Signal<[ContextMenuItem], NoError> {
+        guard canCopy else { return .single([]) }
         let text = self.leftLayout.attributedString.string
         return .single([
             ContextMenuItem(strings().textCopy, handler: {
@@ -71,6 +75,7 @@ public class PollResultStickItem: TableStickItem {
     }
     
     public required init(_ initialSize: NSSize) {
+        self.canCopy = false
         self.viewType = .legacy
         self.leftLayout = TextViewLayout(NSAttributedString())
         self.rightLayout = TextViewLayout(NSAttributedString())
@@ -174,6 +179,9 @@ private final class PollResultStickView : TableStickView {
         guard let item = item as? PollResultStickItem else {
             return
         }
+        self.textView.textView.isSelectable = item.canCopy
+        self.textView.textView.userInteractionEnabled = item.canCopy
+        self.textView.userInteractionEnabled = item.canCopy
         self.textView.set(text: item.leftLayout, context: item.context)
         self.textAdditionView.update(item.leftAdditionLayout)
         self.rightView.update(item.rightLayout)

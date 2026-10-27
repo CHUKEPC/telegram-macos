@@ -17,6 +17,7 @@ import ShortPeerRow
 import StatisticsUI
 import InlineStickerLayer
 import LocalAnimations
+import MessageUtils
 
 
 
@@ -71,7 +72,7 @@ private let collapsedInitialLimit: Int = 14
 
 private let _id_loading = InputDataIdentifier("_id_loading")
 
-private func pollResultEntries(_ state: PollResultState, context: any AccountContextProtocol, openProfile:@escaping(PeerId)->Void, expandOption: @escaping(Data)->Void, collapseOption: @escaping(Data)->Void) -> [InputDataEntry] {
+private func pollResultEntries(_ state: PollResultState, context: any AccountContextProtocol, canCopy: Bool, openProfile:@escaping(PeerId)->Void, expandOption: @escaping(Data)->Void, collapseOption: @escaping(Data)->Void) -> [InputDataEntry] {
     var sectionId: Int32 = 0
     var index: Int32 = 0
     
@@ -85,11 +86,17 @@ private func pollResultEntries(_ state: PollResultState, context: any AccountCon
     InlineStickerItem.apply(to: attr, associatedMedia: [:], entities: state.poll.textEntities, isPremium: true)
 
     let pollQuestionText = state.poll.text
-    entries.append(.desc(sectionId: sectionId, index: index, text: .attributed(attr), data: InputDataGeneralTextData(color: theme.colors.text, detectBold: true, isTextSelectable: true, viewType: .modern(position: .inner, insets: NSEdgeInsetsMake(0, 0, 0, 0)), fontSize: .huge, contextMenu: {
+    let copyItems: () -> [ContextMenuItem] = {
+        guard canCopy else { return [] }
         return [ContextMenuItem(strings().textCopy, handler: {
             copyToClipboard(pollQuestionText)
         }, itemImage: MenuAnimation.menu_copy.value)]
-    }, context: context)))
+    }
+    let interactions = TextViewInteractions(copy: { !canCopy })
+    if !canCopy {
+        interactions.menuItems = { _ in .single([]) }
+    }
+    entries.append(.desc(sectionId: sectionId, index: index, text: .attributed(attr), data: InputDataGeneralTextData(color: theme.colors.text, detectBold: true, isTextSelectable: canCopy, viewType: .modern(position: .inner, insets: NSEdgeInsetsMake(0, 0, 0, 0)), fontSize: .huge, contextMenu: copyItems, context: context, linkExecutor: interactions)))
     index += 1
     
     
@@ -141,7 +148,7 @@ private func pollResultEntries(_ state: PollResultState, context: any AccountCon
             
             let text = option.option.text
             let additionText:String = " — \(option.percent)%"
-            entries.append(.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_option_header(option.option.opaqueIdentifier), equatable: InputDataEquatable(state), comparable: nil, item: { initialSize, stableId in
+            entries.append(.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_option_header(option.option.opaqueIdentifier), equatable: InputDataEquatable([InputDataEquatable(state), InputDataEquatable(canCopy)]), comparable: nil, item: { initialSize, stableId in
                 
                 let collapse:(()->Void)?
                 if state.expandedOptions[option.option.opaqueIdentifier] != nil {
@@ -156,7 +163,7 @@ private func pollResultEntries(_ state: PollResultState, context: any AccountCon
                 attr.append(string: text, color: theme.colors.listGrayText, font: .normal(11.5))
                 InlineStickerItem.apply(to: attr, associatedMedia: [:], entities: option.option.entities, isPremium: true)
                 
-                return PollResultStickItem(initialSize, stableId: stableId, left: attr, context: context, additionText: additionText, right: poll.isQuiz ? strings().chatQuizTotalVotesOther(option.votesCount) : strings().chatPollTotalVotes1Other(option.votesCount), collapse: collapse, viewType: .textTopItem)
+                return PollResultStickItem(initialSize, stableId: stableId, left: attr, context: context, additionText: additionText, right: poll.isQuiz ? strings().chatQuizTotalVotesOther(option.votesCount) : strings().chatPollTotalVotes1Other(option.votesCount), collapse: collapse, viewType: .textTopItem, canCopy: canCopy)
                 
             }))
             index += 1
@@ -315,8 +322,13 @@ public func PollResultController(context: any AccountContextProtocol, message: M
     
     var openProfile:((PeerId)->Void)? = nil
     
-    let signal = statePromise.get() |> map {
-        pollResultEntries($0, context: context, openProfile: { peerId in
+    let signal = combineLatest(statePromise.get(), context.account.postbox.peerView(id: message.id.peerId)) |> map { state, peerView in
+        var peers = message.peers
+        if let peer = peerViewMainPeer(peerView) {
+            peers[message.id.peerId] = peer
+        }
+        let canCopy = peers[message.id.peerId] != nil && !message.withUpdatedPeers(peers).isCopyProtected(cachedData: peerView.cachedData)
+        return pollResultEntries(state, context: context, canCopy: canCopy, openProfile: { peerId in
             openProfile?(peerId)
         }, expandOption: { identifier in
             updateState {

@@ -9,6 +9,7 @@ let deps: [(String, String)] = [
     ("Localization", "../Localization"),
     ("TelegramContext", "../TelegramContext"),
     ("TelegramUtils", "../TelegramUtils"),
+    ("MessageUtils", "../MessageUtils"),
     ("TelegramTheme", "../TelegramTheme"),
     ("ColorPalette", "../ColorPalette"),
     ("FoundationUtils", "../FoundationUtils"),
