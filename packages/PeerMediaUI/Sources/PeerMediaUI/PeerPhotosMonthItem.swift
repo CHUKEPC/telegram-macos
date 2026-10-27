@@ -216,16 +216,13 @@ public class PeerPhotosMonthItem: GeneralRowItem {
             }, itemImage: MenuAnimation.menu_show_message.value))
 
             let isCopyProtected = message.isCopyProtected() || message.peers[message.id.peerId]?.isCopyProtected(cachedData: self.chatInteraction.presentation.cachedData) == true
-            if !isCopyProtected {
+            if !isCopyProtected, message.pendingProcessingAttribute == nil {
                 if let file = message.media.first(where: { $0 is TelegramMediaFile }) as? TelegramMediaFile {
-                    items.append(ContextMenuItem(strings().contextSaveMedia, handler: { [weak self] in
-                        guard let self else { return }
-                        saveAs(file, account: self.context.account, context: self.context, message: message)
-                    }, itemImage: MenuAnimation.menu_save_as.value))
+                    items.append(messageFileSaveMenuItem(file: file, context: self.context, message: message, title: strings().contextSaveMedia))
                 } else if let image = message.media.first(where: { $0 is TelegramMediaImage }) as? TelegramMediaImage {
                     items.append(ContextMenuItem(strings().contextSaveMedia, handler: { [weak self] in
                         guard let self else { return }
-                        saveImageAs(image, account: self.context.account, context: self.context, message: message)
+                        saveImageAs(image, context: self.context, message: message)
                     }, itemImage: MenuAnimation.menu_save_as.value))
                 }
             }
