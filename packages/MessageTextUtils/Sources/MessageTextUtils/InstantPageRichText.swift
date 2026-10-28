@@ -15,10 +15,9 @@ public func instantPageRichTextFromBlocks(_ blocks: [InstantPageBlock]) -> RichT
         case let .footer(t):           text = t
         case let .heading(t, _):       text = t
         case let .preformatted(t, _):  text = t
-        case let .cover(b):            text = instantPageRichTextFromBlocks([b])
         default:                       text = nil
         }
-        if let text = text, !text.plainText.isEmpty {
+        if let text = text {
             if !parts.isEmpty { parts.append(.plain("\n")) }
             parts.append(text)
         }

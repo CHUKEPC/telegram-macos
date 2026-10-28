@@ -40,11 +40,15 @@ final class InstantPagePreviewTests: XCTestCase {
         XCTAssertEqual(preview.entities.first?.type, .CustomEmoji(stickerPack: nil, fileId: 42))
     }
 
-    func testEmptyCoverDoesNotInsertNewline() {
+    func testPreviewCoverExtractionDoesNotChangeLegacyRichText() {
         let emptyCover = InstantPageBlock.cover(.unsupported)
-        XCTAssertEqual(instantPageRichTextFromBlocks([emptyCover]).plainText, "")
-        XCTAssertEqual(instantPageRichTextFromBlocks([.paragraph(.plain("First")), emptyCover, .paragraph(.plain("Last"))]).plainText, "First\nLast")
-        XCTAssertEqual(instantPageRichTextFromBlocks([.cover(.paragraph(.plain("Covered")))]).plainText, "Covered")
+        XCTAssertEqual(instantPagePreviewText(page([.paragraph(.plain("First")), emptyCover, .paragraph(.plain("Last"))])), "First Last")
+        let cover = InstantPageBlock.cover(.paragraph(.plain("Covered")))
+        XCTAssertEqual(instantPagePreviewText(page([cover])), "Covered")
+        XCTAssertEqual(instantPageRichTextFromBlocks([cover]).plainText, "")
+        let paragraphs: [InstantPageBlock] = [.paragraph(.plain("First")), .paragraph(.empty), .paragraph(.plain("Last"))]
+        XCTAssertEqual(instantPageRichTextFromBlocks(paragraphs).plainText, "First\n\nLast")
+        XCTAssertEqual(instantPagePreviewText(page(paragraphs)), "First Last")
     }
 
     func testNestedPreviewUsesAllSupportedChildrenWithoutEmptySeparators() {
