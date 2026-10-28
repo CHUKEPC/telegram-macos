@@ -17,7 +17,6 @@ import ShortPeerRow
 import StatisticsUI
 import InlineStickerLayer
 import LocalAnimations
-import MessageUtils
 
 
 
@@ -72,7 +71,7 @@ private let collapsedInitialLimit: Int = 14
 
 private let _id_loading = InputDataIdentifier("_id_loading")
 
-private func pollResultEntries(_ state: PollResultState, context: any AccountContextProtocol, canCopy: Bool, openProfile:@escaping(PeerId)->Void, expandOption: @escaping(Data)->Void, collapseOption: @escaping(Data)->Void) -> [InputDataEntry] {
+private func pollResultEntries(_ state: PollResultState, context: any AccountContextProtocol, canCopy: Bool, canCopyText: @escaping () -> Bool, openProfile:@escaping(PeerId)->Void, expandOption: @escaping(Data)->Void, collapseOption: @escaping(Data)->Void) -> [InputDataEntry] {
     var sectionId: Int32 = 0
     var index: Int32 = 0
     
@@ -85,14 +84,17 @@ private func pollResultEntries(_ state: PollResultState, context: any AccountCon
     attr.append(string: state.poll.text, color: theme.colors.listGrayText, font: .normal(.huge))
     InlineStickerItem.apply(to: attr, associatedMedia: [:], entities: state.poll.textEntities, isPremium: true)
 
-    let pollQuestionText = state.poll.text
+    let interactions = LinkHooks.shared.globalLinkExecutor()
+    interactions.copy = { !canCopyText() }
     let copyItems: () -> [ContextMenuItem] = {
-        guard canCopy else { return [] }
+        guard canCopyText() else { return [] }
         return [ContextMenuItem(strings().textCopy, handler: {
-            copyToClipboard(pollQuestionText)
+            guard canCopyText() else { return }
+            if !interactions.copyAttributedString(attr) {
+                copyToClipboard(attr.string)
+            }
         }, itemImage: MenuAnimation.menu_copy.value)]
     }
-    let interactions = TextViewInteractions(copy: { !canCopy })
     if !canCopy {
         interactions.menuItems = { _ in .single([]) }
     }
@@ -163,7 +165,7 @@ private func pollResultEntries(_ state: PollResultState, context: any AccountCon
                 attr.append(string: text, color: theme.colors.listGrayText, font: .normal(11.5))
                 InlineStickerItem.apply(to: attr, associatedMedia: [:], entities: option.option.entities, isPremium: true)
                 
-                return PollResultStickItem(initialSize, stableId: stableId, left: attr, context: context, additionText: additionText, right: poll.isQuiz ? strings().chatQuizTotalVotesOther(option.votesCount) : strings().chatPollTotalVotes1Other(option.votesCount), collapse: collapse, viewType: .textTopItem, canCopy: canCopy)
+                return PollResultStickItem(initialSize, stableId: stableId, left: attr, context: context, additionText: additionText, right: poll.isQuiz ? strings().chatQuizTotalVotesOther(option.votesCount) : strings().chatPollTotalVotes1Other(option.votesCount), collapse: collapse, viewType: .textTopItem, canCopy: canCopy, canCopyText: canCopyText)
                 
             }))
             index += 1
@@ -322,13 +324,12 @@ public func PollResultController(context: any AccountContextProtocol, message: M
     
     var openProfile:((PeerId)->Void)? = nil
     
+    let copyPermission = Atomic(value: false)
     let signal = combineLatest(statePromise.get(), context.account.postbox.peerView(id: message.id.peerId)) |> map { state, peerView in
-        var peers = message.peers
-        if let peer = peerViewMainPeer(peerView) {
-            peers[message.id.peerId] = peer
-        }
-        let canCopy = peers[message.id.peerId] != nil && !message.withUpdatedPeers(peers).isCopyProtected(cachedData: peerView.cachedData)
-        return pollResultEntries(state, context: context, canCopy: canCopy, openProfile: { peerId in
+        let peer = peerViewMainPeer(peerView) ?? message.peers[message.id.peerId]
+        let canCopy = !message.flags.contains(.CopyProtected) && peer.map { !$0.isCopyProtected(cachedData: peerView.cachedData) } == true
+        _ = copyPermission.swap(canCopy)
+        return pollResultEntries(state, context: context, canCopy: canCopy, canCopyText: { copyPermission.with { $0 } }, openProfile: { peerId in
             openProfile?(peerId)
         }, expandOption: { identifier in
             updateState {

@@ -28,15 +28,18 @@ public class PollResultStickItem: TableStickItem {
     public let _stableId: AnyHashable
     public let context: (any AccountContextProtocol)?
     public let canCopy: Bool
-    public init(_ initialSize:NSSize, stableId: AnyHashable, left: NSAttributedString, context: any AccountContextProtocol, additionText: String, right: String, collapse: (()->Void)?, viewType: GeneralViewType, canCopy: Bool) {
+    private let canCopyText: () -> Bool
+    public init(_ initialSize:NSSize, stableId: AnyHashable, left: NSAttributedString, context: any AccountContextProtocol, additionText: String, right: String, collapse: (()->Void)?, viewType: GeneralViewType, canCopy: Bool, canCopyText: @escaping () -> Bool) {
         self.canCopy = canCopy
+        self.canCopyText = canCopyText
         self.viewType = viewType
         self._stableId = stableId
         self.context = context
         self.inset = NSEdgeInsets(left: 20, right: 20)
         self.collapse = collapse
         self.leftLayout = TextViewLayout(left, maximumNumberOfLines: 1, truncationType: .end, mayItems: canCopy)
-        self.leftLayout.interactions.copy = { !canCopy }
+        self.leftLayout.interactions = LinkHooks.shared.globalLinkExecutor()
+        self.leftLayout.interactions.copy = { !canCopyText() }
         self.leftAdditionLayout = TextViewLayout(.initialize(string: additionText, color: theme.colors.listGrayText, font: .normal(11.5)), maximumNumberOfLines: 1, truncationType: .end)
 
         if let collapse = collapse {
@@ -65,17 +68,23 @@ public class PollResultStickItem: TableStickItem {
     }
 
     public override func menuItems(in location: NSPoint) -> Signal<[ContextMenuItem], NoError> {
-        guard canCopy else { return .single([]) }
-        let text = self.leftLayout.attributedString.string
+        guard canCopyText() else { return .single([]) }
+        let text = self.leftLayout.attributedString
+        let interactions = self.leftLayout.interactions
+        let canCopyText = self.canCopyText
         return .single([
             ContextMenuItem(strings().textCopy, handler: {
-                copyToClipboard(text)
+                guard canCopyText() else { return }
+                if !interactions.copyAttributedString(text) {
+                    copyToClipboard(text.string)
+                }
             }, itemImage: MenuAnimation.menu_copy.value)
         ])
     }
     
     public required init(_ initialSize: NSSize) {
         self.canCopy = false
+        self.canCopyText = { false }
         self.viewType = .legacy
         self.leftLayout = TextViewLayout(NSAttributedString())
         self.rightLayout = TextViewLayout(NSAttributedString())
