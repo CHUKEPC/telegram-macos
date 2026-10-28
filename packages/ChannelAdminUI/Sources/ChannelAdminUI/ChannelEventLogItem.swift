@@ -152,9 +152,61 @@ private class ServiceEventLogMessageContentItem {
 }
 
 
+private class ServiceEventLogTextView: TextView {
+    weak var serviceItem: ServiceEventLogItem?
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let item = serviceItem, let layout = textLayout else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        let link = layout.link(at: convert(event.locationInWindow, from: nil))
+        let previousMenuItems = layout.interactions.menuItems
+        defer {
+            layout.interactions.menuItems = previousMenuItems
+        }
+        layout.interactions.menuItems = { [weak item, weak layout] _ in
+            guard let item = item, let layout = layout else { return .single([]) }
+            let text = layout.attributedString
+            let range = layout.selectedRange.range
+            var selectedText = text
+            if range.location != NSNotFound, range.location >= 0, range.location <= text.length, range.length >= 0, range.length <= text.length - range.location {
+                selectedText = text.attributedSubstring(from: range)
+            }
+            let interactions = layout.interactions
+            let resolvedLink = link.flatMap { interactions.resolveLink($0.0) }
+            let copyTitle = resolvedLink.flatMap { _ in link.map { interactions.localizeLinkCopy($0.1) } } ?? strings().chatContextCopyText
+            let copyItem = ContextMenuItem(copyTitle, handler: {
+                if let resolvedLink = resolvedLink {
+                    copyToClipboard(resolvedLink)
+                } else if interactions.copy?() != true, !interactions.copyAttributedString(selectedText) {
+                    copyToClipboard(selectedText.string)
+                }
+            }, itemImage: TextView.context_copy_animation)
+            var items = [copyItem]
+            if resolvedLink == nil, let translate = interactions.translate?(selectedText.string, item.chatInteraction.interactionContext.window) {
+                items.append(translate)
+            }
+            let moderationItems = item.moderationMenuItems()
+            if !moderationItems.isEmpty {
+                items.append(ContextSeparatorItem())
+                items += moderationItems
+            }
+            return .single(items)
+        }
+        super.rightMouseDown(with: event)
+    }
+}
+
 private class ServiceEventLogMessagePanelView : View {
-    private let headerView = TextView()
-    private let textView = TextView()
+    private let headerView = ServiceEventLogTextView()
+    private let textView = ServiceEventLogTextView()
+    weak var serviceItem: ServiceEventLogItem? {
+        didSet {
+            headerView.serviceItem = serviceItem
+            textView.serviceItem = serviceItem
+        }
+    }
     required init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         headerView.isSelectable = false
@@ -197,10 +249,18 @@ private class ServiceEventLogMessagePanelView : View {
 
 private class ServiceEventLogMessageContainerView : View {
     fileprivate let avatar: AvatarControl = AvatarControl(font: .avatar(.short))
-    fileprivate let name:TextView = TextView()
-    fileprivate let date:TextView = TextView()
+    fileprivate let name = ServiceEventLogTextView()
+    fileprivate let date = ServiceEventLogTextView()
     fileprivate let container:View = View()
-    fileprivate let messageContent:TextView = TextView()
+    fileprivate let messageContent = ServiceEventLogTextView()
+    weak var serviceItem: ServiceEventLogItem? {
+        didSet {
+            name.serviceItem = serviceItem
+            date.serviceItem = serviceItem
+            messageContent.serviceItem = serviceItem
+            panelView?.serviceItem = serviceItem
+        }
+    }
     fileprivate var contentItem:ServiceEventLogMessageContentItem?
     fileprivate var panelView: ServiceEventLogMessagePanelView?
     required init(frame frameRect: NSRect) {
@@ -231,6 +291,7 @@ private class ServiceEventLogMessageContainerView : View {
         
         if let panel = content.panel {
             panelView = ServiceEventLogMessagePanelView(frame: NSZeroRect)
+            panelView?.serviceItem = serviceItem
             panelView?.setFrameSize(content.panelSize)
             panelView?.update(with: panel)
             addSubview(panelView!)
@@ -925,45 +986,6 @@ class ServiceEventLogItem: TableRowItem {
         textLayout = TextViewLayout(attributedString, alignment: .center)
         textLayout.interactions = LinkHooks.shared.globalLinkExecutor()
         super.init(initialSize)
-
-        var layouts = [textLayout]
-        if let content = contentMessageItem {
-            layouts += [content.name, content.date, content.content]
-            if let panel = content.panel {
-                layouts += [panel.header, panel.content]
-            }
-        }
-        for layout in layouts {
-            layout.interactions.menuItems = { [weak self, weak layout] linkType in
-                guard let self = self, let layout = layout else { return .single([]) }
-                let text = layout.attributedString
-                let range = layout.selectedRange.range
-                var selectedText = text
-                var resolvedLink: String?
-                if range.location != NSNotFound, range.location >= 0, range.location < text.length, range.length >= 0, range.length <= text.length - range.location {
-                    selectedText = text.attributedSubstring(from: range)
-                    if linkType != nil, let link = text.attribute(.link, at: range.location, effectiveRange: nil) {
-                        resolvedLink = layout.interactions.resolveLink(link)
-                    }
-                }
-                let copyTitle = linkType.map { layout.interactions.localizeLinkCopy($0) } ?? strings().chatContextCopyText
-                let interactions = layout.interactions
-                let copyItem = ContextMenuItem(copyTitle, handler: {
-                    if let resolvedLink = resolvedLink {
-                        copyToClipboard(resolvedLink)
-                    } else if interactions.copy?() != true, !interactions.copyAttributedString(selectedText) {
-                        copyToClipboard(selectedText.string)
-                    }
-                }, itemImage: TextView.context_copy_animation)
-                var textItems = [copyItem]
-                if resolvedLink == nil, let translate = interactions.translate?(selectedText.string, self.chatInteraction.interactionContext.window) {
-                    textItems.append(translate)
-                }
-                return self.menuItems(in: .zero) |> map { items in
-                    return textItems + (items.isEmpty ? [] : [ContextSeparatorItem()] + items)
-                }
-            }
-        }
     }
     
     override var stableId: AnyHashable {
@@ -978,23 +1000,28 @@ class ServiceEventLogItem: TableRowItem {
     }
 
     override func menuItems(in location: NSPoint) -> Signal<[ContextMenuItem], NoError> {
-        let channel = chatInteraction.peer as? TelegramChannel
-        guard let channel = channel, !channel.isChannel, channel.hasPermission(.banMembers) else {
-            return .single([])
+        return .single(moderationMenuItems())
+    }
+
+    fileprivate func moderationMenuItems() -> [ContextMenuItem] {
+        guard let channel = chatInteraction.peer as? TelegramChannel, !channel.isChannel, channel.hasPermission(.banMembers) else {
+            return []
         }
         let context = chatInteraction.interactionContext
-        let peerId = self.peerId
-
+        var participant: ChannelParticipant?
         var targetPeers: [Peer] = []
         switch entry.event.action {
         case .deleteMessage:
             targetPeers = getGroupPeers(self.group)
         case let .participantToggleBan(_, new):
             targetPeers = [new.peer._asPeer()]
+            participant = new.participant
         case let .participantToggleAdmin(_, new):
             targetPeers = [new.peer._asPeer()]
-        case let .participantInvite(participant):
-            targetPeers = [participant.peer._asPeer()]
+            participant = new.participant
+        case let .participantInvite(invited):
+            targetPeers = [invited.peer._asPeer()]
+            participant = invited.participant
         case let .editMessage(_, new):
             if let author = new.author {
                 targetPeers = [author]
@@ -1010,39 +1037,30 @@ class ServiceEventLogItem: TableRowItem {
         }
 
         targetPeers = targetPeers.filter { $0.id != context.peerId && ($0.isUser || $0.isBot) }
-        guard !targetPeers.isEmpty else {
-            return .single([])
-        }
-
         let visiblePeers = Array(targetPeers.prefix(10))
-        let showMessages = targetPeers.count > visiblePeers.count && !groupRevealed
-        let showMessagesTitle = strings().eventLogServiceShowMoreOther(group.count - 1)
-        let toggleGroup = self.toggleGroup
-        return combineLatest(visiblePeers.map { target in
-            return ChannelAdminUIHooks.shared.participantModerationMenuItems(context, peerId, target, true)
-        }) |> deliverOnMainQueue |> map { menus in
-            var items: [ContextMenuItem] = []
-            for (target, actions) in zip(visiblePeers, menus) where !actions.isEmpty {
-                if targetPeers.count == 1 {
-                    items += actions
-                } else {
-                    let item = ContextMenuItem(target.compactDisplayTitle)
-                    let submenu = ContextMenu()
-                    submenu.items = actions
-                    item.submenu = submenu
-                    items.append(item)
-                }
+        var items: [ContextMenuItem] = []
+        for target in visiblePeers {
+            let actions = ChannelAdminUIHooks.shared.participantModerationMenuItems(context, channel, target, participant)
+            guard !actions.isEmpty else { continue }
+            if targetPeers.count == 1 {
+                items += actions
+            } else {
+                let item = ContextMenuItem(target.compactDisplayTitle)
+                let submenu = ContextMenu()
+                submenu.items = actions
+                item.submenu = submenu
+                items.append(item)
             }
-            if showMessages {
-                items.append(ContextMenuItem(showMessagesTitle, handler: toggleGroup))
-            }
-            return items
         }
+        if targetPeers.count > visiblePeers.count && !groupRevealed {
+            items.append(ContextMenuItem(strings().eventLogServiceShowMoreOther(group.count - 1), handler: toggleGroup))
+        }
+        return items
     }
 }
 
 private class ServiceEventLogRowView : TableRowView {
-    private let textView: TextView = TextView()
+    private let textView = ServiceEventLogTextView()
     private var imageView:TransformImageView?
     private var messageContent:ServiceEventLogMessageContainerView?
     required init(frame frameRect: NSRect) {
@@ -1082,12 +1100,14 @@ private class ServiceEventLogRowView : TableRowView {
     
     override func set(item: TableRowItem, animated: Bool) {
         if let item = item as? ServiceEventLogItem {
+            textView.serviceItem = item
             textView.update(item.textLayout)
             
             if let content = item.contentMessageItem {
                 if messageContent == nil {
                     messageContent = ServiceEventLogMessageContainerView(frame: NSZeroRect)
                 }
+                messageContent?.serviceItem = item
                 messageContent?.update(with: content, account: item.chatInteraction.interactionContext.account)
                 messageContent?.setFrameSize(frame.width - (defaultContentInset.left + defaultContentInset.right), content.height)
                 addSubview(messageContent!)

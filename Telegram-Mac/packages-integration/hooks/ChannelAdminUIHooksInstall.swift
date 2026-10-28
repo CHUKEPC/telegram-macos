@@ -18,7 +18,7 @@ func installChannelAdminUIHooks() {
         context.sharedContext.showInlinePlayer(object)
     }, pushPeerInfo: { navigation, context, peerId in
         PeerInfoController.push(navigation: navigation, context: context as! AccountContext, peerId: peerId)
-    }, participantModerationMenuItems: { context, peerId, member, includeBan in
-        return channelParticipantModerationMenuItems(context: context, peerId: peerId, member: member, includeBan: includeBan)
+    }, participantModerationMenuItems: { context, channel, member, participant in
+        return channelParticipantModerationMenuItems(context: context, channel: channel, member: member, participant: participant)
     }))
 }

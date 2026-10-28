@@ -12,14 +12,14 @@ public struct ChannelAdminUIHooks {
     public let makeInlineAudioPlayerContextObject: (APController, any AccountContextProtocol, TableView?, TableView?) -> Any
     public let showInlineAudioPlayer: (APController, any AccountContextProtocol, TableView?, TableView?) -> Void
     public let pushPeerInfo: (NavigationViewController, any AccountContextProtocol, PeerId) -> Void
-    public let participantModerationMenuItems: (any AccountContextProtocol, PeerId, Peer, Bool) -> Signal<[ContextMenuItem], NoError>
+    public let participantModerationMenuItems: (any AccountContextProtocol, TelegramChannel, Peer, ChannelParticipant?) -> [ContextMenuItem]
 
     public init(messageWithUpdatedTimestamp: @escaping (Message, Int32) -> Message,
                 getAudioPlayer: @escaping (any AccountContextProtocol) -> APController?,
                 makeInlineAudioPlayerContextObject: @escaping (APController, any AccountContextProtocol, TableView?, TableView?) -> Any,
                 showInlineAudioPlayer: @escaping (APController, any AccountContextProtocol, TableView?, TableView?) -> Void,
                 pushPeerInfo: @escaping (NavigationViewController, any AccountContextProtocol, PeerId) -> Void,
-                participantModerationMenuItems: @escaping (any AccountContextProtocol, PeerId, Peer, Bool) -> Signal<[ContextMenuItem], NoError>) {
+                participantModerationMenuItems: @escaping (any AccountContextProtocol, TelegramChannel, Peer, ChannelParticipant?) -> [ContextMenuItem]) {
         self.messageWithUpdatedTimestamp = messageWithUpdatedTimestamp
         self.getAudioPlayer = getAudioPlayer
         self.makeInlineAudioPlayerContextObject = makeInlineAudioPlayerContextObject
@@ -56,6 +56,6 @@ public struct ChannelAdminUIHooks {
     }, showInlineAudioPlayer: { _, _, _, _ in
     }, pushPeerInfo: { _, _, _ in
     }, participantModerationMenuItems: { _, _, _, _ in
-        .single([])
+        []
     })
 }

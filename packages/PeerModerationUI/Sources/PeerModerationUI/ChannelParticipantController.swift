@@ -454,10 +454,20 @@ private func channelParticipantHasBannedRights(_ participant: ChannelParticipant
     return banInfo.rights.flags == expectedFlags && (expectedFlags.isEmpty || actualUntilDate == expectedUntilDate)
 }
 
-public func channelParticipantModerationMenuItems(context: any AccountContextProtocol, peerId: PeerId, member: Peer, includeBan: Bool) -> Signal<[ContextMenuItem], NoError> {
-    guard member.id != context.peerId, member.isUser || member.isBot else {
-        return .single([])
+private enum ChannelParticipantModerationResult {
+    case unauthorized
+    case verified
+    case unverified
+}
+
+public func channelParticipantModerationMenuItems(context: any AccountContextProtocol, channel: TelegramChannel, member: Peer, participant: ChannelParticipant? = nil) -> [ContextMenuItem] {
+    guard !channel.isChannel, channel.hasPermission(.banMembers), member.id != context.peerId, member.isUser || member.isBot else {
+        return []
     }
+    if let participant = participant, !canModerateChannelParticipant(channel: channel, accountPeerId: context.peerId, member: member, participant: participant) {
+        return []
+    }
+    let peerId = channel.id
     let authorizedParticipant = context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
     |> mapToSignal { peer -> Signal<ChannelParticipant?, NoError> in
         guard let channel = peer?._asPeer() as? TelegramChannel, !channel.isChannel, channel.hasPermission(.banMembers) else {
@@ -473,52 +483,53 @@ public func channelParticipantModerationMenuItems(context: any AccountContextPro
     |> deliverOnMainQueue
 
     let updateRights: (TelegramChatBannedRights) -> Void = { rights in
-        let update = authorizedParticipant |> mapToSignal { participant -> Signal<Bool, NoError> in
+        let update = authorizedParticipant |> mapToSignal { participant -> Signal<ChannelParticipantModerationResult, NoError> in
             guard participant != nil else {
-                return .single(false)
+                return .single(.unauthorized)
             }
-            return context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: member.id, bannedRights: rights)
-            |> then(.single(()))
-            |> mapToSignal { _ in
-                return context.engine.peers.fetchChannelParticipant(peerId: peerId, participantId: member.id)
-                |> map { participant in
-                    return channelParticipantHasBannedRights(participant, rights: rights)
+            return Signal { subscriber in
+                let update = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: member.id, bannedRights: rights)
+                |> then(.single(()))
+                |> mapToSignal { _ in
+                    return context.engine.peers.fetchChannelParticipant(peerId: peerId, participantId: member.id)
+                    |> take(1)
+                    |> timeout(10.0, queue: .mainQueue(), alternate: .single(nil))
+                    |> map { participant -> ChannelParticipantModerationResult in
+                        return channelParticipantHasBannedRights(participant, rights: rights) ? .verified : .unverified
+                    }
                 }
+                _ = update.startStandalone(next: { success in
+                    subscriber.putNext(success)
+                }, completed: {
+                    subscriber.putCompletion()
+                })
+                return EmptyDisposable
             }
         }
-        |> castError(String.self)
-        |> timeout(15.0, queue: .mainQueue(), alternate: .fail(strings().unknownError))
         |> deliverOnMainQueue
 
-        _ = showModalProgress(signal: update, for: context.window).startStandalone(next: { success in
-            if success {
+        _ = showModalProgress(signal: update, for: context.window).startStandalone(next: { result in
+            switch result {
+            case .verified:
                 _ = showModalSuccess(for: context.window, icon: theme.icons.successModalProgress, delay: 3.0).startStandalone()
-            } else {
+            case .unauthorized:
                 alert(for: context.window, info: strings().unknownError)
+            case .unverified:
+                //TODOLANG
+                alert(for: context.window, info: "Could not confirm the updated permissions. Check the member’s permissions before trying again.")
             }
-        }, error: { _ in
-            alert(for: context.window, info: strings().unknownError)
         })
     }
 
-    return authorizedParticipant |> map { participant in
-        guard participant != nil else {
-            return []
-        }
-        var items = [ContextMenuItem(strings().chatContextRestrict, handler: {
-            _ = showModalProgress(signal: authorizedParticipant, for: context.window).startStandalone(next: { participant in
-                guard let participant = participant else {
-                    alert(for: context.window, info: strings().unknownError)
-                    return
-                }
-                showModal(with: RestrictedModalController(context, peerId: peerId, memberId: member.id, initialParticipant: participant, updated: updateRights), for: context.window)
-            })
-        }, itemImage: MenuAnimation.menu_restrict.value)]
-        if includeBan {
-            items.append(ContextMenuItem(strings().chatContextBan, handler: {
-                updateRights(TelegramChatBannedRights(flags: [.banReadMessages], untilDate: Int32.max))
-            }, itemMode: .destruct, itemImage: MenuAnimation.menu_ban.value))
-        }
-        return items
-    }
+    return [ContextMenuItem(strings().chatContextRestrict, handler: {
+        _ = showModalProgress(signal: authorizedParticipant, for: context.window).startStandalone(next: { participant in
+            guard let participant = participant else {
+                alert(for: context.window, info: strings().unknownError)
+                return
+            }
+            showModal(with: RestrictedModalController(context, peerId: peerId, memberId: member.id, initialParticipant: participant, updated: updateRights), for: context.window)
+        })
+    }, itemImage: MenuAnimation.menu_restrict.value), ContextMenuItem(strings().chatContextBan, handler: {
+        updateRights(TelegramChatBannedRights(flags: [.banReadMessages], untilDate: Int32.max))
+    }, itemMode: .destruct, itemImage: MenuAnimation.menu_ban.value)]
 }

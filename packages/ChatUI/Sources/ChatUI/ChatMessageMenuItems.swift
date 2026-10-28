@@ -340,13 +340,6 @@ public func chatMenuItems(for message: Message, entry: ChatHistoryEntry?, textLa
         return .complete()
     }
 
-    let moderationItems: Signal<[ContextMenuItem], NoError>
-    if chatInteraction.isLogInteraction, let author = message.author ?? message.effectiveAuthor {
-        moderationItems = ChatHistoryUIHooks.shared.participantModerationMenuItems(chatInteraction.interactionContext, chatInteraction.peerId, author, true)
-    } else {
-        moderationItems = .single([])
-    }
-
     let selectedIds = chatInteraction.presentation.selectionState?.selectedIds ?? []
     let selectedMessages: Signal<[Message], NoError>
     if selectedIds.count > 1, selectedIds.contains(message.id) {
@@ -355,7 +348,7 @@ public func chatMenuItems(for message: Message, entry: ChatHistoryEntry?, textLa
         selectedMessages = .single([])
     }
 
-    return combineLatest(queue: .mainQueue(), chatMenuItemsData(for: message, textLayout: textLayout, entry: entry, chatInteraction: chatInteraction, source: source), selectedMessages, moderationItems) |> map { [chatInteraction] data, selectedMessages, moderationItems in
+    return combineLatest(queue: .mainQueue(), chatMenuItemsData(for: message, textLayout: textLayout, entry: entry, chatInteraction: chatInteraction, source: source), selectedMessages) |> map { [chatInteraction] data, selectedMessages in
         
         let peer = data.message.peers[data.message.id.peerId]
         let isNotFailed = !message.flags.contains(.Failed) && !message.flags.contains(.Unsent) && !data.message.flags.contains(.Sending)
@@ -1495,7 +1488,9 @@ public func chatMenuItems(for message: Message, entry: ChatHistoryEntry?, textLa
                         
             fifthBlock.append(reportItem)
         }
-        fifthBlock.append(contentsOf: moderationItems)
+        if chatInteraction.isLogInteraction, let channel = chatInteraction.peer as? TelegramChannel, let author = message.author ?? message.effectiveAuthor {
+            fifthBlock.append(contentsOf: ChatHistoryUIHooks.shared.participantModerationMenuItems(context, channel, author, nil))
+        }
         
         if data.updatingMessageMedia[messageId] != nil {
             fifthBlock.append(ContextMenuItem(strings().chatContextCancelEditing, handler: {

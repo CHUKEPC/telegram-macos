@@ -1512,21 +1512,18 @@ public class ChatRowView: TableRowView, Notifable, MultipleSelectable, ChatTextS
                             }, itemImage: MenuAnimation.menu_tag_rename.value))
                         }
 
-                        if !channel.isChannel, channel.hasPermission(.banMembers), peer.isUser || peer.isBot {
-                            let disposable = MetaDisposable()
-                            let includeBan = chatInteraction?.isLogInteraction == true
-                            menu.onShow = { menu in
-                                disposable.set(ChatHistoryUIHooks.shared.participantModerationMenuItems(context, peerId, peer, includeBan).start(next: { [weak menu] items in
-                                    guard let menu = menu else { return }
-                                    if !includeBan {
-                                        items.first?.title = strings().channelMemberRestrict
+                        if chatInteraction?.isLogInteraction == true {
+                            menu.items += ChatHistoryUIHooks.shared.participantModerationMenuItems(context, channel, peer, nil)
+                        } else if channel.hasPermission(.banMembers) {
+                            menu.addItem(ContextMenuItem(strings().channelMemberRestrict, handler: {
+                                _ = fetchParticipant.start(next: { rendered in
+                                    if let rendered = rendered {
+                                        showModal(with: ChatHistoryUIHooks.shared.makeRestrictedModalController(context, peerId, authorId, rendered.participant, { updatedRights in
+                                            _ = context.peerChannelMemberCategoriesContextsManager.updateMemberBannedRights(peerId: peerId, memberId: authorId, bannedRights: updatedRights).start()
+                                        }), for: context.window)
                                     }
-                                    menu.items += items
-                                }))
-                            }
-                            menu.onClose = {
-                                disposable.set(nil)
-                            }
+                                })
+                            }, itemImage: MenuAnimation.menu_restrict.value))
                         }
 
                         if channel.hasPermission(.addAdmins) {
