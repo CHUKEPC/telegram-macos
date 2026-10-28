@@ -111,6 +111,20 @@ final class SearchPeerContextMenuTests: XCTestCase {
         XCTAssertNotEqual(searchPeerNotificationPeerId(secret), secretId)
     }
 
+    func testSavedSubchatMenuCannotMutateRegularChatState() {
+        for pinned in [false, true] {
+            var calls: [String] = []
+            let items = searchSavedPeerMenuItems(profileTitle: "Profile", isPinned: pinned, openProfile: { calls.append("profile") }, togglePin: { calls.append("savedPin") })
+            XCTAssertEqual(labels(items), ["Profile", "separator", pinned ? strings().chatListContextUnpin : strings().chatListContextPin])
+            items[0].handler?()
+            items[2].handler?()
+            XCTAssertEqual(calls, ["profile", "savedPin"])
+            XCTAssertTrue(items.allSatisfy { $0.submenu == nil })
+        }
+        let own = searchSavedPeerMenuItems(profileTitle: nil, isPinned: false, openProfile: {}, togglePin: {})
+        XCTAssertEqual(labels(own), [strings().chatListContextPin])
+    }
+
     func testMissingChatAndSavedMessagesOmitInapplicableActions() {
         let missing = searchPeerMenuItems(state: state(manage: false), profileTitle: "Profile", actions: actions(), folders: [], remove: nil)
         XCTAssertEqual(labels(missing), ["Profile"])

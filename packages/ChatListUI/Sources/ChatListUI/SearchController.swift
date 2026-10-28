@@ -338,16 +338,16 @@ fileprivate enum ChatListSearchEntry: Comparable, Identifiable {
 }
 
 
-private func peerContextMenuItems(peer: Peer, arguments: SearchControllerArguments, isRecent: Bool, chatPeerId: PeerId? = nil) -> Signal<[ContextMenuItem], NoError> {
+private func peerContextMenuItems(peer: Peer, arguments: SearchControllerArguments, isRecent: Bool) -> Signal<[ContextMenuItem], NoError> {
     let remove: ContextMenuItem?
     if isRecent {
         remove = ContextMenuItem(strings().searchRemoveFromRecent, handler: {
-            arguments.removeRecentPeerId(chatPeerId ?? peer.id)
+            arguments.removeRecentPeerId(peer.id)
         }, itemMode: .destruct, itemImage: MenuAnimation.menu_delete.value)
     } else {
         remove = nil
     }
-    return searchPeerContextMenuItems(peer: peer, context: arguments.context, chatPeerId: chatPeerId, canPin: true, remove: remove)
+    return searchPeerContextMenuItems(peer: peer, context: arguments.context, target: arguments.target, canPin: true, remove: remove)
 }
 
 
@@ -432,7 +432,7 @@ fileprivate func prepareEntries(from:[AppearanceWrapperEntry<ChatListSearchEntry
             return RecentPeerRowItem(initialSize, peer: peer, account: arguments.context.account, context: arguments.context, stableId: entry.stableId, titleStyle: ControlStyle(font: .medium(.text), foregroundColor: secretChat != nil ? theme.colors.accent : theme.colors.text, highlightColor:.white), borderType: [.Right], drawCustomSeparator: drawBorder, isLookSavedMessage: true, drawLastSeparator: true, canRemoveFromRecent: false, controlAction: {
                 arguments.setPeerAsTag(peer)
             }, contextMenuItems: {
-                return peerContextMenuItems(peer: peer, arguments: arguments, isRecent: false, chatPeerId: secretChat?.peerId)
+                return peerContextMenuItems(peer: peer, arguments: arguments, isRecent: false)
             }, unreadBadge: badge, canAddAsTag: canAddAsTag, storyStats: storyStats, openStory: arguments.openStory, customAction: customAction, monoforumPeer: chatOrMonoforum)
         case let .topic(item, _, _, _, _):
             return SearchTopicRowItem(initialSize, stableId: entry.stableId, item: item, context: arguments.context)
@@ -463,7 +463,7 @@ fileprivate func prepareEntries(from:[AppearanceWrapperEntry<ChatListSearchEntry
                     arguments.removeRecentPeerId(peer.id)
                 }
             }, contextMenuItems: {
-                return peerContextMenuItems(peer: peer, arguments: arguments, isRecent: true, chatPeerId: secretChat?.peerId)
+                return peerContextMenuItems(peer: peer, arguments: arguments, isRecent: true)
             }, unreadBadge: badge, storyStats: storyStats, openStory: arguments.openStory, customAction: customAction, isGrossingApp: isGrossingApp, isRecentApp: isRecentApp, monoforumPeer: chatOrMonoforum)
         case let .savedMessages(peer):
             return RecentPeerRowItem(initialSize, peer: peer, account: arguments.context.account, context: arguments.context, stableId: entry.stableId, titleStyle: ControlStyle(font: .medium(.text), foregroundColor: theme.colors.text, highlightColor:.white), borderType: [.Right], drawCustomSeparator: true, isLookSavedMessage: true, contextMenuItems: {

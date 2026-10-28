@@ -86,24 +86,52 @@ func searchPeerNotificationPeerId(_ peer: Peer) -> PeerId {
     return peer.notificationSettingsPeerId ?? peer.id
 }
 
-func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol, chatPeerId: PeerId? = nil, canPin: Bool = false, remove: ContextMenuItem? = nil) -> Signal<[ContextMenuItem], NoError> {
-    let peerId = chatPeerId ?? peer.id
+func searchSavedPeerMenuItems(profileTitle: String?, isPinned: Bool, openProfile: @escaping () -> Void, togglePin: @escaping () -> Void) -> [ContextMenuItem] {
+    var items: [ContextMenuItem] = []
+    if let profileTitle {
+        items.append(ContextMenuItem(profileTitle, handler: openProfile, itemImage: MenuAnimation.menu_open_profile.value))
+        items.append(ContextSeparatorItem())
+    }
+    items.append(ContextMenuItem(isPinned ? strings().chatListContextUnpin : strings().chatListContextPin, handler: togglePin, itemImage: isPinned ? MenuAnimation.menu_unpin.value : MenuAnimation.menu_pin.value))
+    return items
+}
+
+func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol, target: SearchControllerTarget? = nil, canPin: Bool = false, remove: ContextMenuItem? = nil) -> Signal<[ContextMenuItem], NoError> {
+    if case let .savedMessages(savedPeerId)? = target {
+        let threadId = peer.id.toInt64()
+        return context.account.postbox.transaction { transaction in
+            transaction.getPeerPinnedThreads(peerId: savedPeerId).contains(threadId)
+        } |> deliverOnMainQueue |> map { isPinned in
+            searchSavedPeerMenuItems(profileTitle: peer.id == context.peerId ? nil : (peer is TelegramUser ? strings().exportedInvitationContextOpenProfile : strings().chatContextPeerOpenInfo), isPinned: isPinned, openProfile: {
+                ChatListUIHooks.shared.pushPeerInfo(context.bindings.rootNavigation(), context, peer.id)
+            }, togglePin: {
+                _ = (context.engine.peers.toggleForumChannelTopicPinned(id: savedPeerId, threadId: threadId) |> deliverOnMainQueue).start(error: { error in
+                    switch error {
+                    case let .limitReached(count):
+                        alert(for: context.window, info: strings().chatListContextPinErrorTopicsOther(count))
+                    default:
+                        alert(for: context.window, info: strings().unknownError)
+                    }
+                })
+            })
+        }
+    }
+    let peerId = peer.id
     let timestamp = context.timestamp
     let snapshot = context.account.postbox.transaction { transaction -> (Peer, SearchPeerMenuState, PeerId) in
         let currentPeer = transaction.getPeer(peer.id) ?? peer
-        let chatPeer = transaction.getPeer(peerId) ?? currentPeer
         let chatIndex = transaction.getPeerChatListIndex(peerId)
-        let notificationPeerId = searchPeerNotificationPeerId(chatPeer)
+        let notificationPeerId = searchPeerNotificationPeerId(currentPeer)
         let settings = transaction.getPeerNotificationSettings(id: notificationPeerId)
         let isMuted: Bool
         if let settings = settings as? TelegramPeerNotificationSettings, case let .muted(until) = settings.muteState {
             isMuted = until > timestamp
         } else {
-            isMuted = resolvedIsRemovedFromTotalUnreadCount(globalSettings: transaction.getGlobalNotificationSettings(), peer: chatPeer, peerSettings: settings)
+            isMuted = resolvedIsRemovedFromTotalUnreadCount(globalSettings: transaction.getGlobalNotificationSettings(), peer: currentPeer, peerSettings: settings)
         }
         let readState = transaction.getCombinedPeerReadState(peerId)
-        let displayAsRegularChat = (chatPeer as? TelegramChannel)?.flags.contains(.displayForumAsTabs) == true || (transaction.getPeerCachedData(peerId: peerId) as? CachedChannelData)?.viewForumAsMessages.knownValue == true
-        let canMarkUnread = peerId.namespace != Namespaces.Peer.SecretChat && (!chatPeer.isForumOrMonoForum || displayAsRegularChat)
+        let displayAsRegularChat = (currentPeer as? TelegramChannel)?.flags.contains(.displayForumAsTabs) == true || (transaction.getPeerCachedData(peerId: peerId) as? CachedChannelData)?.viewForumAsMessages.knownValue == true
+        let canMarkUnread = peerId.namespace != Namespaces.Peer.SecretChat && (!currentPeer.isForumOrMonoForum || displayAsRegularChat)
         let isSelf = peerId == context.peerId
         let state = SearchPeerMenuState(
             canOpenProfile: !isSelf,
