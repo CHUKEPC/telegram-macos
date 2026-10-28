@@ -29,6 +29,9 @@ peer = source('packages/TelegramUtils/Sources/TelegramUtils/PeerExtras.swift')
 text = source('packages/TGUIKit/Sources/TextView.swift')
 entities = source('packages/ChatUI/Sources/ChatUI/ChatMessageItem.swift')
 menu = source('packages/ChatUI/Sources/ChatUI/ChatMessageMenuItems.swift')
+assert 'mode.customChatContents == nil, data.textLayout?.0?.selectedRange.hasSelectText != true' in menu
+assert 'if !isRichMessage, !(message.media.first is TelegramMediaPoll),' in menu
+assert 'source: .selectedText' in menu
 
 assert 'ignoreLinks: !object.additionalData.canHighlightLinks && isIncoming' in poll
 assert 'nameLayout.interactions = LinkHooks.shared.globalLinkExecutor()' not in poll
@@ -56,7 +59,8 @@ blocks = {
     '__CLICK__': section(poll, '        set(handler: { [weak self] control in', '    required init?(coder: NSCoder) {').rsplit('    }', 1)[0],
     '__COPY_POLICY__': section(poll, '    fileprivate var canCopyText: Bool', '    public override init('),
     '__PEER_POLICY__': section(peer, '    func isCopyProtected(cachedData:', '    var maybePremiumRequired:'),
-    '__INVALIDATE__': section(poll, '    private func updateTextSelection(', '    public override func canStartTextSelecting'),
+    '__INVALIDATE__': section(poll, '    private func updateTextSelection(', '    func menuTextLayout('),
+    '__MENU_TARGET__': section(poll, '    func menuTextLayout(', '    public override func canStartTextSelecting'),
     '__BIND_SELECTION__': binding_update,
     '__RESULT_POLICY__': section(results, '        let peer = peerViewMainPeer(peerView)', '        return pollResultEntries'),
     '__QUESTION_COPY__': section(results, '    let interactions =', '    entries.append(.desc'),

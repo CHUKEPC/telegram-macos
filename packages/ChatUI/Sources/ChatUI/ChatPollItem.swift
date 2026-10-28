@@ -765,7 +765,7 @@ public class ChatPollItem: ChatRowItem {
             } else {
                 source = .general
             }
-            return chatMenuItems(for: message, entry: entry, textLayout: foundIndex == nil ? (descriptionText, nil) : nil, chatInteraction: chatInteraction, source: source)
+            return chatMenuItems(for: message, entry: entry, textLayout: foundIndex == nil ? ((view as? ChatPollItemView)?.menuTextLayout(at: location), nil) : nil, chatInteraction: chatInteraction, source: source)
         }
         return super.menuItems(in: location)
     }
@@ -1080,6 +1080,17 @@ public final class ChatPollItemView : ChatRowView {
                 view.needsDisplay = true
             }
         }
+    }
+
+    func menuTextLayout(at location: NSPoint) -> TextViewLayout? {
+        let views: [TextView] = [contentNode.titleView.textView] + [contentNode.descriptionView].compactMap { $0 }
+        for view in views {
+            let point = view.convert(location, from: contentView)
+            if view.bounds.contains(point) {
+                return view.textLayout
+            }
+        }
+        return nil
     }
 
     public override func canStartTextSelecting(_ event: NSEvent) -> Bool {

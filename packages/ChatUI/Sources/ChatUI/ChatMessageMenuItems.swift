@@ -848,7 +848,7 @@ public func chatMenuItems(for message: Message, entry: ChatHistoryEntry?, textLa
             }
         }
 
-        if let poll = message.media.first as? TelegramMediaPoll, mode.customChatContents == nil {
+        if let poll = message.media.first as? TelegramMediaPoll, mode.customChatContents == nil, data.textLayout?.0?.selectedRange.hasSelectText != true {
             var text = poll.text
             var entities: [MessageTextEntity] = []
             entities.append(contentsOf: poll.textEntities)
@@ -890,7 +890,7 @@ public func chatMenuItems(for message: Message, entry: ChatHistoryEntry?, textLa
                 // Rich messages get their own Translate item above (flattened preview + translateRichMessage) —
                 // skip the plain-text item so the menu doesn't offer two.
                 let isRichMessage = message.attributes.contains(where: { $0 is RichTextMessageAttribute })
-                if !isRichMessage, language == nil || !toLang.contains(language!), !muteTranslate, !isService, translateConfig.canTranslate {
+                if !isRichMessage, !(message.media.first is TelegramMediaPoll), language == nil || !toLang.contains(language!), !muteTranslate, !isService, translateConfig.canTranslate {
                     thirdBlock.append(ContextMenuItem(strings().chatContextTranslate, handler: {
                         showModal(with: ChatHistoryUIHooks.shared.makeTranslateModalObserved(context, language, appAppearance.languageCode, text, entities, source: .message(messageId), onToneChanged: { tone in
                             data.chatInteraction.setTranslateTone(tone)

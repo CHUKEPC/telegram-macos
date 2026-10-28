@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() {
@@ -78,6 +79,8 @@ final class TextViewLayout {
 }
 
 final class TextView {
+    var bounds: NSRect = .zero
+    func convert(_ point: NSPoint, from: Int) -> NSPoint { point }
     var textLayout: TextViewLayout?
     var selectionPolicyWrites = 0
     var invalidations = 0
@@ -263,6 +266,7 @@ final class ChatPollItem: MenuItem {
     var chatInteraction = ChatInteraction()
     var stableId = 1
     let context = PollContext()
+    var view: Any?
     let entry: ChatHistoryEntry? = ChatHistoryEntry()
     let menuWindow = Window()
     override var menuAdditionView: Signal<Window?, NoError> { .single(menuWindow) }
@@ -274,6 +278,12 @@ final class ChatPollItem: MenuItem {
     var descriptionText: TextViewLayout?
     func configureDescription() {
         __DESCRIPTION_COPY__
+        let row = ChatPollItemView()
+        row.contentNode.titleView.textView.textLayout = TextViewLayout(NSAttributedString(string: "Question"))
+        row.contentNode.titleView.textView.bounds = NSRect(x: 0, y: 0, width: 100, height: 20)
+        row.contentNode.descriptionView?.textLayout = descriptionText
+        row.contentNode.descriptionView?.bounds = NSRect(x: 0, y: 20, width: 100, height: 20)
+        view = row
     }
     __POLL_MENU__
 }
@@ -287,6 +297,11 @@ final class ContentNode {
     let titleView = InteractiveTextView()
     var options = [PollOptionView(), PollOptionView()]
     var descriptionView: TextView? = TextView()
+}
+final class ChatPollItemView {
+    let contentNode = ContentNode()
+    let contentView = 0
+    __MENU_TARGET__
 }
 final class PollView {
     var item: Any?
@@ -658,7 +673,7 @@ case "description-protected-menu":
     item.message?.flags = .CopyProtected
     view.refresh()
     check(item.layout.mayItems == false && view.contentNode.descriptionView?.isSelectable == false, "protected description bypasses local text menu and selection")
-    let menu = item.menuItems(in: NSPoint(x: 0, y: 0)).value
+    let menu = item.menuItems(in: NSPoint(x: 1, y: 25)).value
     check(menu.first?.text == "Message Actions" && menuRequests.last?.layout === item.layout, "protected description delegates row actions and copy filtering to ordinary message menu")
     item.layout.interactions.processURL(LinkType.plain)
     check(executedLinks == 1, "protected description still opens allowed links")
@@ -672,8 +687,12 @@ case "poll-row-menu":
     let item = ChatPollItem()
     item.message = Message(peers: [1: TelegramUser()])
     item.configureDescription()
-    _ = item.menuItems(in: NSPoint(x: 0, y: 0))
-    check(menuRequests.last?.layout === item.descriptionText, "unselected description reaches ordinary row menu")
+    _ = item.menuItems(in: NSPoint(x: 1, y: 25))
+    check(menuRequests.last?.layout === item.descriptionText, "clicked description reaches ordinary row menu")
+    _ = item.menuItems(in: NSPoint(x: 1, y: 5))
+    check(menuRequests.last?.layout?.attributedString.string == "Question", "question click uses question layout")
+    _ = item.menuItems(in: NSPoint(x: 1, y: 60))
+    check(menuRequests.last?.layout == nil, "type label cannot borrow description")
     check(menuRequests.last?.source == .general, "description uses general message menu source")
     for (index, y) in [105.0, 130.0].enumerated() {
         _ = item.menuItems(in: NSPoint(x: 10, y: y))
@@ -681,7 +700,8 @@ case "poll-row-menu":
         check(menuRequests.last?.layout == nil, "option menu does not borrow description selection")
     }
     item.descriptionText = nil
-    _ = item.menuItems(in: NSPoint(x: 0, y: 0))
+    (item.view as? ChatPollItemView)?.contentNode.descriptionView = nil
+    _ = item.menuItems(in: NSPoint(x: 1, y: 25))
     check(menuRequests.last?.layout == nil, "poll without description has no text context")
     let count = menuRequests.count
     item.context.isFrozen = true
