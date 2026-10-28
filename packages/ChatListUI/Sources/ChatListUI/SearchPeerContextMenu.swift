@@ -10,10 +10,12 @@ import Localization
 import LocalAnimations
 import InputDataUI
 import InAppSettings
+import AlertsUI
 
 struct SearchPeerMenuState {
     let canOpenProfile: Bool
     let canManageChat: Bool
+    let canMarkRead: Bool
     let canMarkUnread: Bool
     let canPin: Bool
     var isUnread: Bool
@@ -24,6 +26,7 @@ struct SearchPeerMenuState {
 struct SearchPeerMenuActions {
     let openProfile: () -> Void
     let markRead: (Bool) -> Void
+    let toggleMute: () -> Void
     let mute: (Int32) -> Void
     let muteUntil: () -> Void
     let togglePin: () -> Void
@@ -35,14 +38,12 @@ func searchPeerMenuItems(state: SearchPeerMenuState, profileTitle: String, actio
         items.append(ContextMenuItem(profileTitle, handler: actions.openProfile, itemImage: MenuAnimation.menu_open_profile.value))
     }
     if state.canManageChat {
-        if state.isUnread || state.canMarkUnread {
+        if state.isUnread ? state.canMarkRead : state.canMarkUnread {
             items.append(ContextMenuItem(state.isUnread ? strings().chatListContextMaskAsRead : strings().chatListContextMaskAsUnread, handler: {
                 actions.markRead(state.isUnread)
             }, itemImage: state.isUnread ? MenuAnimation.menu_read.value : MenuAnimation.menu_unread.value))
         }
-        let muteItem = ContextMenuItem(state.isMuted ? strings().chatListContextUnmute : strings().chatListContextMute, handler: {
-            actions.mute(state.isMuted ? 0 : Int32.max)
-        }, itemImage: state.isMuted ? MenuAnimation.menu_unmuted.value : MenuAnimation.menu_mute.value)
+        let muteItem = ContextMenuItem(state.isMuted ? strings().chatListContextUnmute : strings().chatListContextMute, handler: actions.toggleMute, itemImage: state.isMuted ? MenuAnimation.menu_unmuted.value : MenuAnimation.menu_mute.value)
         if !state.isMuted {
             let menu = ContextMenu()
             menu.items = [
@@ -81,12 +82,10 @@ func searchPeerMenuItems(state: SearchPeerMenuState, profileTitle: String, actio
     return items
 }
 
-func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol, chatPeerId: PeerId? = nil, isRecent: Bool = false, remove: ContextMenuItem? = nil) -> Signal<[ContextMenuItem], NoError> {
-    guard !context.isFrozen else {
-        return .single(remove.map { [$0] } ?? [])
-    }
+func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol, chatPeerId: PeerId? = nil, canPin: Bool = false, remove: ContextMenuItem? = nil) -> Signal<[ContextMenuItem], NoError> {
     let peerId = chatPeerId ?? peer.id
-    let snapshot = context.account.postbox.transaction { transaction -> (Peer, SearchPeerMenuState, EngineChatList.Group, PeerId) in
+    let timestamp = context.timestamp
+    let snapshot = context.account.postbox.transaction { transaction -> (Peer, SearchPeerMenuState, PeerId) in
         let currentPeer = transaction.getPeer(peer.id) ?? peer
         let chatPeer = transaction.getPeer(peerId) ?? currentPeer
         let chatIndex = transaction.getPeerChatListIndex(peerId)
@@ -94,7 +93,7 @@ func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol,
         let settings = transaction.getPeerNotificationSettings(id: notificationPeerId)
         let isMuted: Bool
         if let settings = settings as? TelegramPeerNotificationSettings, case let .muted(until) = settings.muteState {
-            isMuted = until > context.timestamp
+            isMuted = until > timestamp
         } else {
             isMuted = resolvedIsRemovedFromTotalUnreadCount(globalSettings: transaction.getGlobalNotificationSettings(), peer: chatPeer, peerSettings: settings)
         }
@@ -105,19 +104,20 @@ func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol,
         let state = SearchPeerMenuState(
             canOpenProfile: !isSelf,
             canManageChat: !isSelf && chatIndex != nil,
+            canMarkRead: peerId.namespace != Namespaces.Peer.SecretChat,
             canMarkUnread: canMarkUnread,
-            canPin: isRecent,
+            canPin: canPin,
             isUnread: readState?.isUnread ?? false,
             isMuted: isMuted,
-            isPinned: chatIndex?.1.pinningIndex != nil
+            isPinned: transaction.getPinnedItemIds(groupId: .root).contains(.peer(peerId))
         )
-        return (currentPeer, state, chatIndex.map { EngineChatList.Group($0.0) } ?? .root, notificationPeerId)
+        return (currentPeer, state, notificationPeerId)
     }
     let readCounters = context.engine.data.get(TelegramEngine.EngineData.Item.Messages.PeerReadCounters(id: peerId))
     return combineLatest(snapshot, chatListFilterPreferences(engine: context.engine) |> take(1), readCounters)
     |> deliverOnMainQueue
     |> map { snapshot, filters, readCounters in
-        let (peer, snapshotState, group, notificationPeerId) = snapshot
+        let (peer, snapshotState, notificationPeerId) = snapshot
         var state = snapshotState
         state.isUnread = state.isUnread || readCounters.isUnread
         let storePeer = context.account.postbox.transaction { transaction -> Void in
@@ -135,6 +135,8 @@ func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol,
             } else {
                 ChatListRowItem.markAsUnread(context: context, peerId: peerId)
             }
+        }, toggleMute: {
+            ChatListRowItem.toggleMuted(context: context, peerId: notificationPeerId, isMuted: state.isMuted, threadId: nil)
         }, mute: { interval in
             _ = context.engine.peers.updatePeerMuteSetting(peerId: notificationPeerId, threadId: nil, muteInterval: interval).start()
         }, muteUntil: {
@@ -143,8 +145,16 @@ func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol,
                 _ = context.engine.peers.updatePeerMuteSetting(peerId: notificationPeerId, threadId: nil, muteInterval: interval).start()
             })
         }, togglePin: {
-            _ = storePeer.start(completed: {
-                ChatListRowItem.togglePinned(context: context, peerId: peerId, isPinned: state.isPinned, mode: .chat, filter: .allChats, associatedGroupId: group)
+            _ = (storePeer |> mapToSignal { _ in
+                context.engine.peers.toggleItemPinned(location: .group(.root), itemId: .peer(peerId))
+            } |> deliverOnMainQueue).start(next: { result in
+                if case .limitExceeded = result {
+                    verifyAlert_button(for: context.window, information: strings().chatListContextPinErrorNew2, ok: strings().alertOK, cancel: "", option: strings().chatListContextPinErrorNewSetupFolders, successHandler: { result in
+                        if case .thrid = result {
+                            context.bindings.rootNavigation().push(ChatListUIHooks.shared.makeChatListFiltersListController(context))
+                        }
+                    })
+                }
             })
         })
         var folders: [ContextMenuItem] = []

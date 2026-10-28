@@ -11,11 +11,11 @@ final class SearchPeerContextMenuTests: XCTestCase {
     }
 
     private func actions(_ record: @escaping (String) -> Void = { _ in }) -> SearchPeerMenuActions {
-        return SearchPeerMenuActions(openProfile: { record("profile") }, markRead: { record($0 ? "read" : "unread") }, mute: { record("mute:\($0)") }, muteUntil: { record("until") }, togglePin: { record("pin") })
+        return SearchPeerMenuActions(openProfile: { record("profile") }, markRead: { record($0 ? "read" : "unread") }, toggleMute: { record("toggleMute") }, mute: { record("mute:\($0)") }, muteUntil: { record("until") }, togglePin: { record("pin") })
     }
 
-    private func state(recent: Bool = false, unread: Bool = false, muted: Bool = false, pinned: Bool = false, profile: Bool = true, manage: Bool = true, canMarkUnread: Bool = true) -> SearchPeerMenuState {
-        return SearchPeerMenuState(canOpenProfile: profile, canManageChat: manage, canMarkUnread: canMarkUnread, canPin: recent, isUnread: unread, isMuted: muted, isPinned: pinned)
+    private func state(canPin: Bool = false, unread: Bool = false, muted: Bool = false, pinned: Bool = false, profile: Bool = true, manage: Bool = true, canMarkRead: Bool = true, canMarkUnread: Bool = true) -> SearchPeerMenuState {
+        return SearchPeerMenuState(canOpenProfile: profile, canManageChat: manage, canMarkRead: canMarkRead, canMarkUnread: canMarkUnread, canPin: canPin, isUnread: unread, isMuted: muted, isPinned: pinned)
     }
 
     private func labels(_ items: [ContextMenuItem]) -> [String] {
@@ -37,20 +37,35 @@ final class SearchPeerContextMenuTests: XCTestCase {
     func testRecentReadMutedPinnedStatesAndCallbacks() {
         var called: [String] = []
         let remove = ContextMenuItem(strings().searchRemoveFromRecent)
-        let items = searchPeerMenuItems(state: state(recent: true, unread: true, muted: true, pinned: true), profileTitle: "Profile", actions: actions { called.append($0) }, folders: [ContextMenuItem("Work")], remove: remove)
+        let items = searchPeerMenuItems(state: state(canPin: true, unread: true, muted: true, pinned: true), profileTitle: "Profile", actions: actions { called.append($0) }, folders: [ContextMenuItem("Work")], remove: remove)
         XCTAssertEqual(labels(items), ["Profile", strings().chatListContextMaskAsRead, strings().chatListContextUnmute, "separator", strings().chatListContextUnpin, strings().chatListFilterAddToFolder, "separator", strings().searchRemoveFromRecent])
         items[0].handler?()
         items[1].handler?()
         items[2].handler?()
         items[4].handler?()
-        XCTAssertEqual(called, ["profile", "read", "mute:0", "pin"])
+        XCTAssertEqual(called, ["profile", "read", "toggleMute", "pin"])
         XCTAssertNil(items[2].submenu)
     }
 
-    func testSearchResultsHaveNoPinRemovalOrTrailingSeparator() {
-        let items = searchPeerMenuItems(state: state(), profileTitle: "Profile", actions: actions(), folders: [ContextMenuItem("Work")], remove: nil)
-        XCTAssertEqual(labels(items), ["Profile", strings().chatListContextMaskAsUnread, strings().chatListContextMute, "separator", strings().chatListFilterAddToFolder])
+    func testSearchResultsRetainPinWithoutRemovalOrTrailingSeparator() {
+        let items = searchPeerMenuItems(state: state(canPin: true), profileTitle: "Profile", actions: actions(), folders: [ContextMenuItem("Work")], remove: nil)
+        XCTAssertEqual(labels(items), ["Profile", strings().chatListContextMaskAsUnread, strings().chatListContextMute, "separator", strings().chatListContextPin, strings().chatListFilterAddToFolder])
         XCTAssertFalse(items.last is ContextSeparatorItem)
+    }
+
+    func testMuteParentUsesChooserWithoutSelectingADuration() {
+        var called: [String] = []
+        let items = searchPeerMenuItems(state: state(), profileTitle: "Profile", actions: actions { called.append($0) }, folders: [], remove: nil)
+        items[2].handler?()
+        XCTAssertEqual(called, ["toggleMute"])
+        XCTAssertNotNil(items[2].submenu)
+    }
+
+    func testSecretChatsKeepNotificationsButOmitBothReadActions() {
+        for unread in [false, true] {
+            let items = searchPeerMenuItems(state: state(canPin: true, unread: unread, canMarkRead: false, canMarkUnread: false), profileTitle: "Profile", actions: actions(), folders: [], remove: nil)
+            XCTAssertEqual(labels(items), ["Profile", strings().chatListContextMute, "separator", strings().chatListContextPin])
+        }
     }
 
     func testNotificationSubmenuDurationsAndUnreadAction() throws {
@@ -65,7 +80,7 @@ final class SearchPeerContextMenuTests: XCTestCase {
         XCTAssertEqual(called, ["unread", "mute:3600", "mute:28800", "mute:259200", "until", "mute:2147483647"])
     }
 
-    func testReadOnlyUnreadPolicyDoesNotHideMuteForSecretChatsOrForums() {
+    func testReadOnlyUnreadPolicyDoesNotHideMuteForForums() {
         let read = searchPeerMenuItems(state: state(canMarkUnread: false), profileTitle: "Profile", actions: actions(), folders: [], remove: nil)
         XCTAssertEqual(labels(read), ["Profile", strings().chatListContextMute])
         XCTAssertNotNil(read[1].submenu)
@@ -79,8 +94,8 @@ final class SearchPeerContextMenuTests: XCTestCase {
     func testMissingChatAndSavedMessagesOmitInapplicableActions() {
         let missing = searchPeerMenuItems(state: state(manage: false), profileTitle: "Profile", actions: actions(), folders: [], remove: nil)
         XCTAssertEqual(labels(missing), ["Profile"])
-        let saved = searchPeerMenuItems(state: state(profile: false, manage: false), profileTitle: "Profile", actions: actions(), folders: [ContextMenuItem("Work")], remove: nil)
-        XCTAssertEqual(labels(saved), [strings().chatListFilterAddToFolder])
+        let saved = searchPeerMenuItems(state: state(canPin: true, profile: false, manage: false), profileTitle: "Profile", actions: actions(), folders: [ContextMenuItem("Work")], remove: nil)
+        XCTAssertEqual(labels(saved), [strings().chatListContextPin, strings().chatListFilterAddToFolder])
         let remove = ContextMenuItem(strings().searchPopularDelete)
         let removalOnly = searchPeerMenuItems(state: state(profile: false, manage: false), profileTitle: "Profile", actions: actions(), folders: [], remove: remove)
         XCTAssertEqual(removalOnly.count, 1)
