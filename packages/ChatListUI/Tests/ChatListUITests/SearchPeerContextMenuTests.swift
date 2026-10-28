@@ -1,6 +1,8 @@
 import XCTest
 import TGUIKit
 import Localization
+import Postbox
+import TelegramCore
 @testable import ChatListUI
 
 final class SearchPeerContextMenuTests: XCTestCase {
@@ -89,6 +91,24 @@ final class SearchPeerContextMenuTests: XCTestCase {
         XCTAssertEqual(labels(unread), ["Profile", strings().chatListContextMaskAsRead, strings().chatListContextMute])
         unread[1].handler?()
         XCTAssertEqual(called, ["read"])
+    }
+
+    func testChannelDirectMessagesKeepTheirOwnNotificationIdentity() {
+        let channelId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: ._internalFromInt64Value(10))
+        let messagesId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: ._internalFromInt64Value(11))
+        let messages = TelegramChannel(id: messagesId, accessHash: nil, title: "Messages", username: nil, photo: [], creationDate: 0, version: 0, participationStatus: .member, info: .group(TelegramChannelGroupInfo(flags: [])), flags: [.isMonoforum], restrictionInfo: nil, adminRights: nil, bannedRights: nil, defaultBannedRights: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, emojiStatus: nil, approximateBoostLevel: nil, subscriptionUntilDate: nil, verificationIconFileId: nil, sendPaidMessageStars: nil, linkedMonoforumId: channelId)
+        XCTAssertEqual(messages.associatedPeerId, channelId)
+        XCTAssertNil(messages.notificationSettingsPeerId)
+        XCTAssertEqual(searchPeerNotificationPeerId(messages), messagesId)
+        XCTAssertNotEqual(searchPeerNotificationPeerId(messages), channelId)
+    }
+
+    func testSecretChatsKeepTheirExplicitNotificationPeer() {
+        let secretId = PeerId(namespace: Namespaces.Peer.SecretChat, id: ._internalFromInt64Value(20))
+        let userId = PeerId(namespace: Namespaces.Peer.CloudUser, id: ._internalFromInt64Value(21))
+        let secret = TelegramSecretChat(id: secretId, creationDate: 0, regularPeerId: userId, accessHash: 0, role: .creator, embeddedState: .active, messageAutoremoveTimeout: nil)
+        XCTAssertEqual(searchPeerNotificationPeerId(secret), userId)
+        XCTAssertNotEqual(searchPeerNotificationPeerId(secret), secretId)
     }
 
     func testMissingChatAndSavedMessagesOmitInapplicableActions() {

@@ -82,6 +82,10 @@ func searchPeerMenuItems(state: SearchPeerMenuState, profileTitle: String, actio
     return items
 }
 
+func searchPeerNotificationPeerId(_ peer: Peer) -> PeerId {
+    return peer.notificationSettingsPeerId ?? peer.id
+}
+
 func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol, chatPeerId: PeerId? = nil, canPin: Bool = false, remove: ContextMenuItem? = nil) -> Signal<[ContextMenuItem], NoError> {
     let peerId = chatPeerId ?? peer.id
     let timestamp = context.timestamp
@@ -89,7 +93,7 @@ func searchPeerContextMenuItems(peer: Peer, context: any AccountContextProtocol,
         let currentPeer = transaction.getPeer(peer.id) ?? peer
         let chatPeer = transaction.getPeer(peerId) ?? currentPeer
         let chatIndex = transaction.getPeerChatListIndex(peerId)
-        let notificationPeerId = chatPeer.notificationSettingsPeerId ?? chatPeer.associatedPeerId ?? peerId
+        let notificationPeerId = searchPeerNotificationPeerId(chatPeer)
         let settings = transaction.getPeerNotificationSettings(id: notificationPeerId)
         let isMuted: Bool
         if let settings = settings as? TelegramPeerNotificationSettings, case let .muted(until) = settings.muteState {
