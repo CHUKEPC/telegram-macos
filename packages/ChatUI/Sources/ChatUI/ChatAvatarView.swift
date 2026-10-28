@@ -28,6 +28,34 @@ public final class ChatAvatarView : Control {
         self.scaleOnClick = true
     }
     private var peer: Peer?
+    private var menuBinding = UUID()
+
+    func updateContextMenu(_ factory: (() -> ContextMenu?)?) {
+        let binding = UUID()
+        menuBinding = binding
+        guard let factory else {
+            contextMenu = nil
+            return
+        }
+        contextMenu = { [weak self] in
+            guard let self, self.menuBinding == binding, let menu = factory() else { return nil }
+            func guardActions(_ menu: NSMenu) {
+                for case let item as ContextMenuItem in menu.items {
+                    if let action = item.handler {
+                        item.handler = { [weak self] in
+                            guard self?.menuBinding == binding else { return }
+                            action()
+                        }
+                    }
+                    if let submenu = item.submenu {
+                        guardActions(submenu)
+                    }
+                }
+            }
+            guardActions(menu)
+            return menu
+        }
+    }
     
     public func setPeer(item: ChatRowItem, peer: Peer, storyStats: PeerStoryStats? = nil, message: Message? = nil, size: NSSize? = nil, force: Bool = false, disableForum: Bool = false) {
         
@@ -41,6 +69,13 @@ public final class ChatAvatarView : Control {
             self.storyComponent = nil
         }
         self.peer = peer
+        if peer.id.id._internalGetInt64Value() != 0 {
+            self.updateContextMenu(ChatRowView.photoContextMenu(item, peer: peer, setOpenProgress: { [weak self] signal in
+                self?.setOpenProgress(signal)
+            }))
+        } else {
+            self.updateContextMenu(nil)
+        }
         
         self.avatar.setPeer(account: context.account, peer: peer, message: message, size: size, disableForum: disableForum)
         if peer.isPremium || force, peer.hasVideo, !TelegramUtilsHooks.shared.isLite(.animations) {

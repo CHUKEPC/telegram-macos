@@ -160,6 +160,11 @@ private class ServiceEventLogTextView: TextView {
             super.rightMouseDown(with: event)
             return
         }
+        let moderationItems = item.moderationMenuItems()
+        guard !moderationItems.isEmpty else {
+            super.rightMouseDown(with: event)
+            return
+        }
         let link = layout.link(at: convert(event.locationInWindow, from: nil))
         let previousMenuItems = layout.interactions.menuItems
         defer {
@@ -175,7 +180,7 @@ private class ServiceEventLogTextView: TextView {
             }
             let interactions = layout.interactions
             let resolvedLink = link.flatMap { interactions.resolveLink($0.0) }
-            let copyTitle = resolvedLink.flatMap { _ in link.map { interactions.localizeLinkCopy($0.1) } } ?? strings().chatContextCopyText
+            let copyTitle = resolvedLink.flatMap { _ in link.map { interactions.localizeLinkCopy($0.1) } } ?? localizedString("Text.Copy")
             let copyItem = ContextMenuItem(copyTitle, handler: {
                 if let resolvedLink = resolvedLink {
                     copyToClipboard(resolvedLink)
@@ -187,11 +192,8 @@ private class ServiceEventLogTextView: TextView {
             if resolvedLink == nil, let translate = interactions.translate?(selectedText.string, item.chatInteraction.interactionContext.window) {
                 items.append(translate)
             }
-            let moderationItems = item.moderationMenuItems()
-            if !moderationItems.isEmpty {
-                items.append(ContextSeparatorItem())
-                items += moderationItems
-            }
+            items.append(ContextSeparatorItem())
+            items += moderationItems
             return .single(items)
         }
         super.rightMouseDown(with: event)
