@@ -122,10 +122,10 @@ public class BaseApplicationSettings: Codable, Equatable {
     public let highQualityStories: Bool
 
     public static var defaultSettings: BaseApplicationSettings {
-        return BaseApplicationSettings(handleInAppKeys: false, sidebar: true, showCallsTab: true, showContactsTab: true, showWalletTab: true, latestArticles: true, predictEmoji: true, bigEmoji: true, statusBar: true, translateChannels: true, doNotTranslate: Set(), paywall: nil, liteMode: .standart, highQualityStories: false)
+        return BaseApplicationSettings(handleInAppKeys: false, sidebar: true, showCallsTab: true, showContactsTab: true, showWalletTab: false, latestArticles: true, predictEmoji: true, bigEmoji: true, statusBar: true, translateChannels: true, doNotTranslate: Set(), paywall: nil, liteMode: .standart, highQualityStories: false)
     }
 
-    init(handleInAppKeys: Bool, sidebar: Bool, showCallsTab: Bool, showContactsTab: Bool = true, showWalletTab: Bool = true, latestArticles: Bool, predictEmoji: Bool, bigEmoji: Bool, statusBar: Bool, translateChannels: Bool, doNotTranslate: Set<String>, paywall: TranslatePaywall?, liteMode: LiteMode, highQualityStories: Bool) {
+    init(handleInAppKeys: Bool, sidebar: Bool, showCallsTab: Bool, showContactsTab: Bool = true, showWalletTab: Bool = false, latestArticles: Bool, predictEmoji: Bool, bigEmoji: Bool, statusBar: Bool, translateChannels: Bool, doNotTranslate: Set<String>, paywall: TranslatePaywall?, liteMode: LiteMode, highQualityStories: Bool) {
         self.handleInAppKeys = handleInAppKeys
         self.sidebar = sidebar
         self.showCallsTab = showCallsTab
@@ -147,7 +147,7 @@ public class BaseApplicationSettings: Codable, Equatable {
 
         self.showCallsTab = try container.decode(Int32.self, forKey: "c") != 0
         self.showContactsTab = try container.decodeIfPresent(Int32.self, forKey: "cnt") ?? 1 != 0
-        self.showWalletTab = try container.decodeIfPresent(Int32.self, forKey: "wlt") ?? 1 != 0
+        self.showWalletTab = try container.decodeIfPresent(Int32.self, forKey: "wlt") ?? 0 != 0
         self.handleInAppKeys = try container.decode(Int32.self, forKey: "h") != 0
         self.sidebar = try container.decode(Int32.self, forKey: "e") != 0
         self.latestArticles = try container.decode(Int32.self, forKey: "la") != 0

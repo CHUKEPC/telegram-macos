@@ -57,6 +57,7 @@ struct FloatingTabBarLayout {
 final class TabBarItemControl: Control {
     weak var tabBar: TabBarView?
     var tabIsSelected = false
+    var tabIsAction = false
     private var contextClick = false
 
     override var mouseDownCanMoveWindow: Bool {
@@ -89,11 +90,11 @@ final class TabBarItemControl: Control {
     }
 
     override func accessibilityRole() -> NSAccessibility.Role? {
-        return isAccessibilityElement() ? .radioButton : super.accessibilityRole()
+        return isAccessibilityElement() ? (tabIsAction ? .button : .radioButton) : super.accessibilityRole()
     }
 
     override func isAccessibilitySelected() -> Bool {
-        return tabIsSelected
+        return !tabIsAction && tabIsSelected
     }
 }
 
@@ -101,6 +102,7 @@ public class TabBarView: View {
     private struct SelectionGesture {
         let start: NSPoint
         let center: CGFloat
+        let actionIndex: Int?
         var position: CGFloat
         var isDragging = false
     }
@@ -319,7 +321,8 @@ public class TabBarView: View {
         tooltip(for: itemControls[index], text: text)
     }
 
-    private func updateMetadata(for control: Control, tab: TabItem) {
+    private func updateMetadata(for control: TabBarItemControl, tab: TabItem) {
+        control.tabIsAction = tab.customAction != nil
         control.setAccessibilityLabel(tab.accessibilityTitle)
         control.toolTip = tab.accessibilityTitle
     }
@@ -388,7 +391,11 @@ public class TabBarView: View {
     }
 
     private func activate(index: Int) {
+        guard !isHidden, itemControls[index].isEnabled, itemControls[index].userInteractionEnabled else {
+            return
+        }
         if let customAction = tabs[index].customAction {
+            cancelSelection()
             customAction()
             return
         }
@@ -404,12 +411,8 @@ public class TabBarView: View {
         guard !isHidden, let index = itemLayout.index(at: point) else {
             return
         }
-        if let customAction = tabs[index].customAction {
-            customAction()
-            return
-        }
         finishGesture()
-        gesture = SelectionGesture(start: point, center: itemLayout.itemFrames[index].midX, position: CGFloat(index))
+        gesture = SelectionGesture(start: point, center: itemLayout.itemFrames[index].midX, actionIndex: tabs[index].customAction != nil ? index : nil, position: CGFloat(index))
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.gesture != nil, event.window === self.window, event.keyCode == 53 else {
                 return event
@@ -426,7 +429,7 @@ public class TabBarView: View {
     }
 
     func updateSelection(at point: NSPoint) {
-        guard var gesture, gesture.isDragging || abs(point.x - gesture.start.x) >= 3 else {
+        guard var gesture, gesture.actionIndex == nil, gesture.isDragging || abs(point.x - gesture.start.x) >= 3 else {
             return
         }
         gesture.isDragging = true
@@ -440,18 +443,28 @@ public class TabBarView: View {
     }
 
     func endSelection(at point: NSPoint) {
-        guard gesture != nil else {
+        guard let gesture else {
             return
         }
-        let isDragging = gesture?.isDragging == true
+        if let index = gesture.actionIndex {
+            finishGesture()
+            updateSelection(animated: true)
+            if bounds.contains(point), itemLayout.index(at: point) == index {
+                activate(index: index)
+            }
+            return
+        }
+        let isDragging = gesture.isDragging
         if isDragging {
             updateSelection(at: point)
         }
-        let index = Int(gesture!.position.rounded())
+        let index = Int(self.gesture!.position.rounded())
         finishGesture()
-        if let customAction = tabs[index].customAction {
+        if tabs[index].customAction != nil {
             updateSelection(animated: true)
-            customAction()
+            if bounds.contains(point), itemLayout.index(at: point) == index {
+                activate(index: index)
+            }
             return
         }
         if index == selectedIndex {

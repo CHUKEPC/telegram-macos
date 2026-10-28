@@ -791,6 +791,155 @@ final class TabBarViewTreeTests: XCTestCase {
         XCTAssertEqual(child.containerContentInsets.bottom, 76)
     }
 
+    private func makeActionBar(_ action: @escaping () -> Void) -> TabBarView {
+        let bar = makeBar(selected: 2)
+        let original = makeTab()
+        let item = TabItem(image: original.image, selectedImage: original.selectedImage, controller: original.controller, customAction: action)
+        item.accessibilityTitle = "Wallet"
+        bar.insertTab(item, at: 3)
+        return bar
+    }
+
+    func testCustomActionWaitsForReleaseAndKeepsTheCurrentTab() {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let delegate = TabSelectionDelegate()
+        bar.delegate = delegate
+        let current = bar.tab(at: 2).controller
+        let point = center(bar, 3)
+        bar.beginSelection(at: point)
+        XCTAssertEqual(calls, 0)
+        XCTAssertTrue(bar.isTrackingSelection)
+        XCTAssertEqual(bar.selectedIndex, 2)
+        XCTAssertFalse(bar.control(for: 3).isAccessibilitySelected())
+        bar.endSelection(at: point)
+        bar.endSelection(at: point)
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(bar.tab(at: bar.selectedIndex).controller === current)
+        XCTAssertTrue(delegate.changes.isEmpty)
+        XCTAssertEqual(delegate.scrollCount, 0)
+        XCTAssertFalse(bar.isTrackingSelection)
+    }
+
+    func testCustomActionMouseEventsWaitForReleaseAndCancelDraggingOff() throws {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let window = NSWindow(contentRect: bar.bounds, styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView = bar
+        let control = bar.control(for: 3)
+        func event(_ type: NSEvent.EventType, at point: NSPoint) throws -> NSEvent {
+            return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: bar.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+        }
+        let inside = center(bar, 3)
+        let outside = NSMakePoint(inside.x, bar.bounds.maxY + 20)
+        control.mouseDown(with: try event(.leftMouseDown, at: inside))
+        XCTAssertEqual(calls, 0)
+        control.mouseDragged(with: try event(.leftMouseDragged, at: outside))
+        control.mouseUp(with: try event(.leftMouseUp, at: outside))
+        XCTAssertEqual(calls, 0)
+        control.mouseDown(with: try event(.leftMouseDown, at: inside))
+        XCTAssertEqual(calls, 0)
+        control.mouseUp(with: try event(.leftMouseUp, at: inside))
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(bar.selectedIndex, 2)
+    }
+
+    func testCustomActionDragOffCancelsWithoutSelectingAnotherTab() {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let point = center(bar, 3)
+        for destination in [center(bar, 2), center(bar, 4), NSMakePoint(point.x, -20), NSMakePoint(point.x, bar.bounds.maxY + 20)] {
+            bar.beginSelection(at: point)
+            bar.updateSelection(at: destination)
+            bar.endSelection(at: destination)
+            XCTAssertEqual(calls, 0)
+            XCTAssertEqual(bar.selectedIndex, 2)
+            XCTAssertFalse(bar.isTrackingSelection)
+        }
+        bar.beginSelection(at: point)
+        bar.updateSelection(at: center(bar, 4))
+        bar.updateSelection(at: point)
+        bar.endSelection(at: point)
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testCustomActionCancellationRemovalAndHidingPreventActivation() {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let point = center(bar, 3)
+        bar.beginSelection(at: point)
+        bar.cancelSelection()
+        bar.endSelection(at: point)
+        bar.beginSelection(at: point)
+        bar.isHidden = true
+        bar.endSelection(at: point)
+        bar.isHidden = false
+        bar.beginSelection(at: point)
+        bar.removeTab(at: 3)
+        bar.endSelection(at: point)
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(bar.selectedIndex, 2)
+    }
+
+    func testDraggingFromATabOnlyActivatesAnActionWhenReleasedInsideIt() {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let destination = center(bar, 3)
+        bar.beginSelection(at: center(bar, 2))
+        bar.updateSelection(at: destination)
+        bar.endSelection(at: NSMakePoint(destination.x, bar.bounds.maxY + 20))
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(bar.selectedIndex, 2)
+        bar.beginSelection(at: center(bar, 2))
+        bar.updateSelection(at: destination)
+        XCTAssertEqual(calls, 0)
+        bar.endSelection(at: destination)
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(bar.selectedIndex, 2)
+    }
+
+    func testCustomActionAccessibilityPressIsAButtonAndCancelsPendingMouseRelease() {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let control = bar.control(for: 3)
+        XCTAssertEqual(control.accessibilityRole(), .button)
+        XCTAssertEqual(control.accessibilityLabel(), "Wallet")
+        XCTAssertFalse(control.isAccessibilitySelected())
+        bar.beginSelection(at: center(bar, 3))
+        XCTAssertTrue(control.accessibilityPerformPress())
+        bar.endSelection(at: center(bar, 3))
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(bar.selectedIndex, 2)
+        XCTAssertFalse(control.isAccessibilitySelected())
+        control.isEnabled = false
+        XCTAssertFalse(control.accessibilityPerformPress())
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testCustomActionDisabledDuringPressDoesNotActivate() {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let point = center(bar, 3)
+        bar.beginSelection(at: point)
+        bar.control(for: 3).isEnabled = false
+        bar.endSelection(at: point)
+        XCTAssertEqual(calls, 0)
+        XCTAssertEqual(bar.selectedIndex, 2)
+    }
+
+    func testCustomActionWindowResignationCancelsPendingRelease() {
+        var calls = 0
+        let bar = makeActionBar { calls += 1 }
+        let window = NSWindow(contentRect: bar.bounds, styleMask: .borderless, backing: .buffered, defer: true)
+        window.contentView = bar
+        let point = center(bar, 3)
+        bar.beginSelection(at: point)
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        bar.endSelection(at: point)
+        XCTAssertEqual(calls, 0)
+        XCTAssertFalse(bar.isTrackingSelection)
+    }
+
     func testAccessibilityPressSelectsOnceAndReportsSelection() {
         let bar = makeBar()
         let delegate = TabSelectionDelegate()

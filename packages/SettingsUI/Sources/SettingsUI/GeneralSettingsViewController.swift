@@ -72,43 +72,43 @@ private enum GeneralSettingsEntry : Comparable, Identifiable {
         case .showCallsTab:
             return 9
         case .showContactsTab:
-            return 901
-        case .showWalletTab:
-            return 902
-        case .statusBar:
             return 10
-        case .inAppSounds:
+        case .showWalletTab:
             return 11
-        case .shortcuts:
+        case .statusBar:
             return 12
-        case .enableRFTCopy:
+        case .inAppSounds:
             return 13
-        case .sendLargePhotos:
+        case .shortcuts:
             return 14
-        case .acceptSecretChats:
+        case .enableRFTCopy:
             return 15
-        case .forceTouchReply:
+        case .sendLargePhotos:
             return 16
-        case .forceTouchEdit:
+        case .acceptSecretChats:
             return 17
-        case .forceTouchForward:
+        case .forceTouchReply:
             return 18
-        case .forceTouchPreviewMedia:
+        case .forceTouchEdit:
             return 19
-        case .forceTouchReact:
+        case .forceTouchForward:
             return 20
-        case .enterBehavior:
+        case .forceTouchPreviewMedia:
             return 21
-        case .cmdEnterBehavior:
+        case .forceTouchReact:
             return 22
-        case .callSettings:
+        case .enterBehavior:
             return 23
-        case .previewChats:
+        case .cmdEnterBehavior:
             return 24
-        case .showProfileId:
+        case .callSettings:
             return 25
-        case .previewChatsInfo:
+        case .previewChats:
             return 26
+        case .showProfileId:
+            return 27
+        case .previewChatsInfo:
+            return 28
         case let .section(id):
             return (id + 1) * 1000 - id
         }
@@ -356,7 +356,7 @@ private final class GeneralSettingsArguments {
    
 }
 
-private func generalSettingsEntries(arguments:GeneralSettingsArguments, baseSettings: BaseApplicationSettings, appearance: Appearance, launchSettings: LaunchSettings, secretChatSettings: SecretChatSettings, additionalSettings: AdditionalSettings) -> [GeneralSettingsEntry] {
+private func generalSettingsEntries(arguments:GeneralSettingsArguments, baseSettings: BaseApplicationSettings, appearance: Appearance, launchSettings: LaunchSettings, secretChatSettings: SecretChatSettings, additionalSettings: AdditionalSettings, walletAvailable: Bool) -> [GeneralSettingsEntry] {
     var sectionId:Int = 1
     var entries:[GeneralSettingsEntry] = []
     
@@ -408,7 +408,9 @@ private func generalSettingsEntries(arguments:GeneralSettingsArguments, baseSett
     headerUnique -= 1
     entries.append(.showCallsTab(sectionId: sectionId, enabled: baseSettings.showCallsTab, viewType: .firstItem))
     entries.append(.showContactsTab(sectionId: sectionId, enabled: baseSettings.showContactsTab, viewType: .innerItem))
-    entries.append(.showWalletTab(sectionId: sectionId, enabled: baseSettings.showWalletTab, viewType: .innerItem))
+    if walletAvailable {
+        entries.append(.showWalletTab(sectionId: sectionId, enabled: baseSettings.showWalletTab, viewType: .innerItem))
+    }
     entries.append(.statusBar(sectionId: sectionId, enabled: baseSettings.statusBar, viewType: .innerItem))
     entries.append(.previewChats(sectionId: sectionId, enabled: additionalSettings.previewChats, viewType: .lastItem))
     entries.append(.previewChatsInfo(sectionId: sectionId))
@@ -580,13 +582,21 @@ open class GeneralSettingsViewController<Context: AccountContextProtocol>: Table
         
         let baseSettingsSignal: Signal<BaseApplicationSettings, NoError> = .single(context.sharedContext.baseSettings) |> then(baseAppSettings(accountManager: context.sharedContext.accountManager))
         
-        let signal = combineLatest(queue: prepareQueue, baseSettingsSignal, inputPromise.get(), forceTouchPromise.get(), appearanceSignal, appLaunchSettings(postbox: context.account.postbox), context.account.postbox.preferencesView(keys: [PreferencesKeys.secretChatSettings]), additionalSettings(accountManager: context.sharedContext.accountManager)) |> map { settings, _, _, appearance, launchSettings, preferencesView, additionalSettings -> TableUpdateTransition in
+        let walletAvailable = context.account.postbox.preferencesView(keys: [PreferencesKeys.appConfiguration]) |> map { view -> Bool in
+            guard #available(macOS 10.15, *), SettingsHooks.shared.walletHooks.hasWallet(context) else {
+                return false
+            }
+            let configuration = view.values[PreferencesKeys.appConfiguration]?.get(AppConfiguration.self) ?? AppConfiguration.defaultValue
+            return configuration.getBoolValue("wallet_available", orElse: false)
+        } |> distinctUntilChanged
+
+        let signal = combineLatest(queue: prepareQueue, baseSettingsSignal, inputPromise.get(), forceTouchPromise.get(), appearanceSignal, appLaunchSettings(postbox: context.account.postbox), context.account.postbox.preferencesView(keys: [PreferencesKeys.secretChatSettings]), additionalSettings(accountManager: context.sharedContext.accountManager), walletAvailable) |> map { settings, _, _, appearance, launchSettings, preferencesView, additionalSettings, walletAvailable -> TableUpdateTransition in
             
             let baseSettings: BaseApplicationSettings = settings
             
             let secretChatSettings = preferencesView.values[PreferencesKeys.secretChatSettings]?.get(SecretChatSettings.self) ?? SecretChatSettings.defaultSettings
             
-            let entries = generalSettingsEntries(arguments: arguments, baseSettings: baseSettings, appearance: appearance, launchSettings: launchSettings, secretChatSettings: secretChatSettings, additionalSettings: additionalSettings).map({AppearanceWrapperEntry(entry: $0, appearance: appearance)})
+            let entries = generalSettingsEntries(arguments: arguments, baseSettings: baseSettings, appearance: appearance, launchSettings: launchSettings, secretChatSettings: secretChatSettings, additionalSettings: additionalSettings, walletAvailable: walletAvailable).map({AppearanceWrapperEntry(entry: $0, appearance: appearance)})
             let previous = previos.swap(entries)
             return prepareEntries(left: previous, right: entries, arguments: arguments, initialSize: initialSize.modify({$0}))
             
