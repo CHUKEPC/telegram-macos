@@ -127,6 +127,36 @@ final class StarTransactionTabsTests: XCTestCase {
         }
     }
 
+    func testLiquidGlassChangesKeepExistingRowAndShadowInsideBounds() throws {
+        let original = System.liquidGlass
+        defer { System.liquidGlass = original }
+        for initial in [true, false] {
+            System.liquidGlass = initial
+            let model = item(["All", "Incoming", "Outgoing"], selected: 1)
+            let view = row(model, width: 600)
+            let height = model.height
+            let (segments, scroll) = try controls(view)
+            for enabled in [!initial, initial, !initial] {
+                System.liquidGlass = enabled
+                view.updateColors()
+                view.updateLayout(size: view.frame.size, transition: .immediate)
+                view.layoutSubtreeIfNeeded()
+                XCTAssertEqual(model.height, height)
+                XCTAssertEqual(view.frame.height, height)
+                XCTAssertTrue(view.containerView.bounds.contains(scroll.frame))
+                try assertSelectedVisible(view)
+                if !enabled {
+                    let glass = try XCTUnwrap(descendants(segments, as: LiquidGlassView.self).first)
+                    let shadow = try XCTUnwrap(glass.shadow)
+                    let document = try XCTUnwrap(scroll.documentView)
+                    let bounds = glass.convert(glass.bounds, to: document).insetBy(dx: -shadow.shadowBlurRadius, dy: -shadow.shadowBlurRadius)
+                    XCTAssertTrue(document.bounds.contains(bounds))
+                    XCTAssertTrue(scroll.clipView.bounds.contains(bounds))
+                }
+            }
+        }
+    }
+
     func testAccessibilityExposesRadioChoicesAndUsesCurrentStableIds() throws {
         var chosen: [Int64] = []
         let tabs = items(["All", "Outgoing"], selected: 0, ids: [0, 2])

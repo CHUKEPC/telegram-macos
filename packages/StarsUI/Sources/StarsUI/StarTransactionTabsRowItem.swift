@@ -7,9 +7,7 @@ final class StarTransactionTabsRowItem: GeneralRowItem {
     let items: [ScrollableSegmentItem]
     let callback: (Int64) -> Void
 
-    static var contentInset: CGFloat {
-        return System.liquidGlass ? 8 : 16
-    }
+    static let contentInset: CGFloat = 16
 
     init(_ initialSize: NSSize, stableId: AnyHashable, items: [ScrollableSegmentItem], viewType: GeneralViewType, callback: @escaping (Int64) -> Void) {
         self.items = items
