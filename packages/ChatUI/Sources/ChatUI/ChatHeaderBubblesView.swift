@@ -888,7 +888,10 @@ final class ChatHeaderBubblesView: View, InteractionContentViewProtocol {
                     result = result.withUpdatedTitle(presentation.threadInfo?.info.title ?? "").withUpdatedStatus(strings().peerInfoTopicStatusIn(peer.displayTitle))
                 }
             case .savedMessages:
-                result = result.withUpdatedTitle(peer.displayTitle).withUpdatedStatus(strings().sharedMediaSavedCountOther(Int(counters.replies ?? 0)))
+                result = result.withUpdatedTitle(peer.displayTitle).withUpdatedStatus("")
+                if let count = counters.replies {
+                    result = result.withUpdatedStatus(count == 0 ? strings().sharedMediaSavedCountOther(0) : strings().chatTitleTopicOther(Int(count)))
+                }
                 if PeerId(data.threadId) == chatInteraction.interactionContext.peerId {
                     result = result.withUpdatedTitle(strings().peerMyNotes)
                 }

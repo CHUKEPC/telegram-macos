@@ -3850,13 +3850,8 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
                         let countViewKey: PostboxViewKey = .historyTagSummaryView(tag: MessageTags(), peerId: peerId, threadId: savedMessagesPeerId.toInt64(), namespace: Namespaces.Message.Cloud, customTag: nil)
                         answersCount = context.account.postbox.combinedView(keys: [basicPeerKey, countViewKey])
                         |> map { views -> Int32? in
-                            
-                            var messageCount = 0
-                            if let summaryView = views.views[countViewKey] as? MessageHistoryTagSummaryView, let count = summaryView.count {
-                                messageCount += Int(count)
-                            }
-                            
-                            return Int32(messageCount)
+                            let count = (views.views[countViewKey] as? MessageHistoryTagSummaryView)?.count
+                            return mode.isSavedMessagesThread ? count : count ?? 0
                         }
 
                     } else if isThread {
