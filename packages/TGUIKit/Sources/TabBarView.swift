@@ -499,7 +499,8 @@ public class TabBarView: View {
         let reduceMotion = self.reduceMotion()
         let animated = animated && !reduceMotion && !modeChanged
         let transition: ContainedViewLayoutTransition = animated ? .animated(duration: 0.4, curve: .spring) : .immediate
-        let previewIndex = gesture.map { Int($0.position.rounded()) } ?? selectedIndex
+        let selectionGesture = gesture.flatMap { $0.actionIndex == nil ? $0 : nil }
+        let previewIndex = selectionGesture.map { Int($0.position.rounded()) } ?? selectedIndex
         for (index, control) in itemControls.enumerated() {
             let selected = index == previewIndex
             if control.tabIsSelected != selected || (selected && playSelectedItem), let icon = control.subviews.first {
@@ -507,7 +508,7 @@ public class TabBarView: View {
                 control.isSelected = selected
                 tabs[index].setSelected(selected, for: icon, animated: animated)
             }
-            let scale: CGFloat = nativeLens == nil && gesture != nil && selected && !reduceMotion ? 1.15 : 1
+            let scale: CGFloat = nativeLens == nil && selectionGesture != nil && selected && !reduceMotion ? 1.15 : 1
             if contentScales[index] != scale, let layer = control.layer {
                 let previous = layer.presentation()?.transform ?? layer.transform
                 var transform = CATransform3DMakeTranslation(control.bounds.midX, control.bounds.midY, 0)
@@ -527,8 +528,9 @@ public class TabBarView: View {
 
     private func updateLens(transition: ContainedViewLayoutTransition) {
         selectionView.isHidden = tabs.isEmpty
-        let position = gesture?.position ?? CGFloat(selectedIndex)
-        let lifted = gesture != nil && !reduceMotion()
+        let selectionGesture = gesture.flatMap { $0.actionIndex == nil ? $0 : nil }
+        let position = selectionGesture?.position ?? CGFloat(selectedIndex)
+        let lifted = selectionGesture != nil && !reduceMotion()
         let frame = itemLayout.selectionFrame(at: position, lifted: lifted, nativeLens: nativeLens != nil)
         selectionView.layer?.cornerRadius = frame.height / 2
         updateSelectionFrame(frame, transition: transition)

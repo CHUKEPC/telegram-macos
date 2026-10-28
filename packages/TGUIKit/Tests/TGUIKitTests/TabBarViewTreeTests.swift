@@ -821,6 +821,37 @@ final class TabBarViewTreeTests: XCTestCase {
         XCTAssertFalse(bar.isTrackingSelection)
     }
 
+    func testActionPressPreservesSelectionVisualsInBothGlassModes() throws {
+        defer { System.liquidGlass = false }
+        for native in [false, true] {
+            if native && !System.liquidGlassAvailable { continue }
+            for reduced in [false, true] {
+                let bar = makeActionBar {}
+                if native { try enableNativeLens(bar) }
+                bar.reduceMotion = { reduced }
+                let restingFrame = bar.selectionFrame
+                let current = bar.control(for: 2)
+                let action = bar.control(for: 3)
+                let currentImage = (current.subviews.first as? ImageView)?.image
+                let actionImage = (action.subviews.first as? ImageView)?.image
+                bar.beginSelection(at: center(bar, 3))
+                XCTAssertEqual(bar.selectionFrame, restingFrame)
+                XCTAssertTrue(current.isSelected)
+                XCTAssertFalse(action.isSelected)
+                XCTAssertTrue((current.subviews.first as? ImageView)?.image === currentImage)
+                XCTAssertTrue((action.subviews.first as? ImageView)?.image === actionImage)
+                XCTAssertEqual(current.layer!.transform.m11, 1, accuracy: 0.001)
+                XCTAssertEqual(action.layer!.transform.m11, 1, accuracy: 0.001)
+                bar.updateSelection(at: center(bar, 4))
+                XCTAssertEqual(bar.selectionFrame, restingFrame)
+                bar.endSelection(at: center(bar, 4))
+                XCTAssertEqual(bar.selectionFrame, restingFrame)
+                XCTAssertEqual(bar.selectedIndex, 2)
+                System.liquidGlass = false
+            }
+        }
+    }
+
     func testCustomActionMouseEventsWaitForReleaseAndCancelDraggingOff() throws {
         var calls = 0
         let bar = makeActionBar { calls += 1 }
