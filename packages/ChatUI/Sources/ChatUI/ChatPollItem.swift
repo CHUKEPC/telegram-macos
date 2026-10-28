@@ -593,6 +593,15 @@ public class ChatPollItem: ChatRowItem {
             layout.interactions.copy = { [weak self] in
                 return self?.canCopyText != true
             }
+            layout.interactions.topWindow = { [weak self] in
+                return self?.menuAdditionView ?? .single(nil)
+            }
+            layout.interactions.menuItems = { [weak self] type in
+                if let strongSelf = self, let message = strongSelf.message {
+                    return chatMenuItems(for: message, entry: strongSelf.entry, textLayout: (strongSelf.descriptionText, type), chatInteraction: strongSelf.chatInteraction)
+                }
+                return .complete()
+            }
             let processURL = layout.interactions.processURL
             let makeLinkType = layout.interactions.makeLinkType
             layout.interactions.processURL = { [weak self] link in
@@ -756,7 +765,7 @@ public class ChatPollItem: ChatRowItem {
             } else {
                 source = .general
             }
-            return chatMenuItems(for: message, entry: entry, textLayout: nil, chatInteraction: chatInteraction, source: source)
+            return chatMenuItems(for: message, entry: entry, textLayout: foundIndex == nil ? (descriptionText, nil) : nil, chatInteraction: chatInteraction, source: source)
         }
         return super.menuItems(in: location)
     }
@@ -1009,7 +1018,7 @@ public final class ChatPollItemView : ChatRowView {
 
         contentNode.change(size: NSMakeSize(contentFrameModifier(item).width, item.contentSize.height), animated: animated)
         contentNode.update(with: item, animated: animated)
-        updateTextSelection()
+        updateTextSelection(updatePermissions: true)
 
         contentNode.updateLayout(item: item, size: contentNode.frame.size, transition: animated ? .animated(duration: 0.2, curve: .easeOut) : .immediate)
     }
@@ -1050,22 +1059,24 @@ public final class ChatPollItemView : ChatRowView {
         updateTextSelection()
     }
 
-    private func updateTextSelection() {
+    private func updateTextSelection(updatePermissions: Bool = false) {
         guard let item = item as? ChatPollItem else { return }
         let canCopy = item.canCopyText
         if !canCopy, selectManager.find(item.stableId) != nil {
             selectManager.removeAll()
         }
-        var views = [contentNode.titleView.textView] + contentNode.options.map { $0.nameView.textView }
+        var views: [TextView] = [contentNode.titleView.textView] + contentNode.options.map { $0.nameView.textView }
         if let descriptionView = contentNode.descriptionView {
             views.append(descriptionView)
         }
         for view in views {
-            view.isSelectable = canCopy
-            view.textLayout?.mayItems = canCopy
-            if !canCopy {
-                view.textLayout?.clearSelect()
-                view.textLayout?.additionalSelections = []
+            if updatePermissions || view.textLayout?.mayItems != canCopy {
+                view.isSelectable = canCopy
+                view.textLayout?.mayItems = canCopy
+            }
+            if !canCopy, let layout = view.textLayout, layout.selectedRange.range.location != NSNotFound || !layout.additionalSelections.isEmpty {
+                layout.clearSelect()
+                layout.additionalSelections = []
                 view.needsDisplay = true
             }
         }
