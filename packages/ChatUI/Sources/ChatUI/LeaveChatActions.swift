@@ -386,20 +386,7 @@ private func showStandardLeaveDialog(context: any AccountContextProtocol, peer: 
                 }
 
                 if let threadId = threadId, peerId == context.peerId {
-                    let navigation = context.bindings.rootNavigation()
-                    var controllers: [ViewController] = []
-                    navigation.enumerateControllers { controller, _ in
-                        if let controller = controller as? ChatControllerKind,
-                           controller.chatInteraction.mode.isSavedMessagesThread,
-                           controller.chatInteraction.chatLocation.peerId == peerId,
-                           controller.chatInteraction.chatLocation.threadId == threadId {
-                            controllers.append(controller)
-                        }
-                        return false
-                    }
-                    for controller in controllers {
-                        navigation.removeImmediately(controller)
-                    }
+                    SavedChatControllerRegistry.shared.remove(accountId: context.account.id, peerId: peerId, threadId: threadId)
                     return true
                 }
 

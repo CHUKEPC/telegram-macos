@@ -11298,6 +11298,9 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
             return takeTableItem?(msgId)
         })
         super.init(context)
+        if mode.isSavedMessagesThread {
+            SavedChatControllerRegistry.shared.add(self)
+        }
 
         self.bar = .init(height: 0)
         self.insets = NSEdgeInsets()

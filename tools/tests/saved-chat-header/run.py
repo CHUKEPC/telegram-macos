@@ -28,7 +28,12 @@ header = source('packages/ChatUI/Sources/ChatUI/ChatHeaderBubblesView.swift')
 controller = source('packages/ChatUI/Sources/ChatUI/ChatController.swift')
 leave = source('packages/ChatUI/Sources/ChatUI/LeaveChatActions.swift')
 navigation = source('packages/TGUIKit/Sources/NavigationViewController.swift')
+if not args.revision:
+    assert 'if mode.isSavedMessagesThread {\n            SavedChatControllerRegistry.shared.add(self)' in controller
+registry = (root / 'packages/ChatUI/Sources/ChatUI/SavedChatControllerRegistry.swift').read_text()
+registry = registry[registry.index('final class SavedChatControllerRegistry'):].replace('final class SavedChatControllerRegistry', 'private final class SavedChatControllerRegistry')
 parts = {
+    '__REGISTRY__': registry,
     '__HEADER__': section(header, '            case .savedMessages:', '            case .saved:'),
     '__COUNTER__': section(controller, '                        |> map { views -> Int32? in', '\n\n                    } else if isThread'),
     '__METADATA__': section(controller, '            if let peer = value.mainPeer, let oldPeer = oldValue.mainPeer {', '\n\n        }'),
