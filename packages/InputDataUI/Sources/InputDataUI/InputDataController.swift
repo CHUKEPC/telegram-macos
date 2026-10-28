@@ -891,7 +891,7 @@ public class InputDataController: GenericViewController<InputDataView> {
         case let .fail(fail):
             switch fail {
             case let .alert(text):
-                if let window = window {
+                if let window = _window {
                     InputDataUIHooks.shared.showAlert(window, text)
                 }
             case let .fields(fields):
