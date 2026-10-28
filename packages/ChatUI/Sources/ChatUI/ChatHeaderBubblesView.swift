@@ -890,7 +890,7 @@ final class ChatHeaderBubblesView: View, InteractionContentViewProtocol {
             case .savedMessages:
                 result = result.withUpdatedTitle(peer.displayTitle).withUpdatedStatus("")
                 if let count = counters.replies {
-                    result = result.withUpdatedStatus(count == 0 ? strings().sharedMediaSavedCountOther(0) : strings().chatTitleTopicOther(Int(count)))
+                    result = result.withUpdatedStatus(strings().sharedMediaSavedCountOther(Int(count)))
                 }
                 if PeerId(data.threadId) == chatInteraction.interactionContext.peerId {
                     result = result.withUpdatedTitle(strings().peerMyNotes)

@@ -193,12 +193,12 @@ final class SavedChatTests: XCTestCase {
         let chat = Chat(context: context)
         context.bindings.navigation.push(chat)
         XCTAssertEqual(chat.header(count: nil), TitleStatus(title: "Saved sender", status: ""))
-        XCTAssertEqual(chat.header(count: counter(5, mode: .savedMessages)), TitleStatus(title: "Saved sender", status: "5 Messages"))
+        XCTAssertEqual(chat.header(count: counter(5, mode: .savedMessages)), TitleStatus(title: "Saved sender", status: "5 messages"))
         chat.metadataChanged(from: Presentation(), to: Presentation(threadInfo: nil))
         XCTAssertTrue(context.bindings.navigation.controller === chat)
         XCTAssertEqual(chat.header(count: counter(0, mode: .savedMessages), presentation: Presentation(threadInfo: nil)), TitleStatus(title: "Saved sender", status: "0 messages"))
-        XCTAssertEqual(chat.header(count: 1).status, "1 Messages")
-        XCTAssertEqual(chat.header(count: 5).status, "5 Messages")
+        XCTAssertEqual(chat.header(count: 1).status, "1 messages")
+        XCTAssertEqual(chat.header(count: 5).status, "5 messages")
     }
 
     func testUnknownSummaryRemainsUnknownAndMonoforumFallbackIsUnchanged() {
@@ -216,7 +216,7 @@ final class SavedChatTests: XCTestCase {
             XCTAssertEqual(chat.header(count: count).title, "My Notes")
         }
         XCTAssertEqual(chat.header(count: nil).status, "")
-        XCTAssertEqual(chat.header(count: 5).status, "5 Messages")
+        XCTAssertEqual(chat.header(count: 5).status, "5 messages")
         XCTAssertEqual(chat.header(count: 0).status, "0 messages")
     }
 
