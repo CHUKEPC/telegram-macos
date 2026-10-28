@@ -881,21 +881,26 @@ final class TabBarViewTreeTests: XCTestCase {
         XCTAssertEqual(bar.selectedIndex, 2)
     }
 
-    func testDraggingFromATabOnlyActivatesAnActionWhenReleasedInsideIt() {
+    func testDraggingFromAnotherTabNeverActivatesAnAction() {
         var calls = 0
         let bar = makeActionBar { calls += 1 }
         let destination = center(bar, 3)
+        for source in [0, 1, 2, 4] {
+            for end in [destination, NSMakePoint(destination.x, bar.bounds.maxY + 20)] {
+                bar.beginSelection(at: center(bar, source))
+                bar.updateSelection(at: destination)
+                bar.endSelection(at: end)
+                XCTAssertEqual(calls, 0)
+                XCTAssertEqual(bar.selectedIndex, 2)
+                XCTAssertFalse(bar.isTrackingSelection)
+            }
+        }
         bar.beginSelection(at: center(bar, 2))
         bar.updateSelection(at: destination)
-        bar.endSelection(at: NSMakePoint(destination.x, bar.bounds.maxY + 20))
+        bar.updateSelection(at: center(bar, 4))
+        bar.endSelection(at: center(bar, 4))
         XCTAssertEqual(calls, 0)
-        XCTAssertEqual(bar.selectedIndex, 2)
-        bar.beginSelection(at: center(bar, 2))
-        bar.updateSelection(at: destination)
-        XCTAssertEqual(calls, 0)
-        bar.endSelection(at: destination)
-        XCTAssertEqual(calls, 1)
-        XCTAssertEqual(bar.selectedIndex, 2)
+        XCTAssertEqual(bar.selectedIndex, 4)
     }
 
     func testCustomActionAccessibilityPressIsAButtonAndCancelsPendingMouseRelease() {

@@ -462,9 +462,6 @@ public class TabBarView: View {
         finishGesture()
         if tabs[index].customAction != nil {
             updateSelection(animated: true)
-            if bounds.contains(point), itemLayout.index(at: point) == index {
-                activate(index: index)
-            }
             return
         }
         if index == selectedIndex {
