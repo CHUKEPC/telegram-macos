@@ -16,6 +16,14 @@ import ColorPalette
 import MessageUtils
 import FoundationUtils
 import AudioPlayerCore
+import FetchManager
+
+func chatMusicFetchStatus(fetchManager: FetchManager, message: Message?, file: TelegramMediaFile) -> Signal<MediaResourceStatus, NoError> {
+    guard let message = message, !(file.resource is LocalFileReferenceMediaResource) else {
+        return .single(.Local)
+    }
+    return fetchManager.fetchStatus(category: .file, location: .chat(message.id.peerId), locationKey: .messageId(message.id), resource: file.resource, reportExternalFetches: false)
+}
 
 public class ChatMusicContentView: ChatAudioContentView {
     private let imageView: TransformImageView = TransformImageView(frame: NSMakeRect(0, 0, 40, 40))
@@ -34,15 +42,18 @@ public class ChatMusicContentView: ChatAudioContentView {
 
     private func updateFetchPresentation() {
         let presentation: ChatMediaPresentation = parameters?.presentation ?? .Empty
+        let showProgress: Bool
         switch fetchStatus {
         case .Fetching?, .Paused?:
-            progressView.theme = RadialProgressTheme(backgroundColor: presentation.activityBackground, foregroundColor: presentation.activityForeground, icon: nil, blendMode: presentation.blendingMode)
-            progressView.isHidden = false
-            imageView.isHidden = true
+            showProgress = playAnimationView == nil || (parent?.flags.contains(.Unsent) == true && parent?.flags.contains(.Failed) != true)
         default:
-            progressView.isHidden = true
-            imageView.isHidden = false
+            showProgress = false
         }
+        if showProgress {
+            progressView.theme = RadialProgressTheme(backgroundColor: presentation.activityBackground, foregroundColor: presentation.activityForeground, icon: nil, blendMode: presentation.blendingMode)
+        }
+        progressView.isHidden = !showProgress
+        imageView.isHidden = showProgress
     }
 
     public override func executeInteraction(_ isControl: Bool) {
@@ -51,6 +62,10 @@ public class ChatMusicContentView: ChatAudioContentView {
         } else {
             super.executeInteraction(isControl)
         }
+    }
+
+    public override func draggingAbility(_ event: NSEvent) -> Bool {
+        return NSPointInRect(convert(event.locationInWindow, from: nil), bounds)
     }
     
     public override func viewDidMoveToWindow() {
@@ -72,18 +87,11 @@ public class ChatMusicContentView: ChatAudioContentView {
     }
     
     public override func update(with media: Media, size: NSSize, context: any AccountContextProtocol, parent: Message?, table: TableView?, parameters: ChatMediaLayoutParameters?, animated: Bool, positionFlags: LayoutPositionFlags? = nil, approximateSynchronousValue: Bool = false) {
+        self.statusDisposable.set(nil)
         super.update(with: media, size: size, context: context, parent: parent, table: table, parameters: parameters, animated: animated, positionFlags: positionFlags)
 
         if let file = media as? TelegramMediaFile, parent?.flags.contains(.Unsent) != true || parent?.flags.contains(.Failed) == true {
-            let status: Signal<MediaResourceStatus, NoError>
-            if let parent = parent {
-                status = chatMessageFileStatus(context: context, message: parent, file: file, approximateSynchronousValue: approximateSynchronousValue)
-            } else {
-                status = context.account.postbox.mediaBox.resourceStatus(file.resource)
-            }
-            self.statusDisposable.set((status |> deliverOnMainQueue).start(next: { [weak self] status in
-                self?.fetchStatus = status
-            }))
+            self.updateFetchStatus(chatMusicFetchStatus(fetchManager: context.fetchManager, message: parent, file: file))
         }
         updateFetchPresentation()
 
@@ -132,30 +140,38 @@ public class ChatMusicContentView: ChatAudioContentView {
       //  imageView.layer?.cornerRadius = 20
     }
     
+    func updateFetchStatus(_ status: Signal<MediaResourceStatus, NoError>) {
+        self.statusDisposable.set((status |> deliverOnMainQueue).start(next: { [weak self] status in
+            self?.fetchStatus = status
+        }))
+    }
+
     public override func checkState(animated: Bool) {
-        if let parent = parent, let controller = ChatMediaUIHooks.shared.getAudioPlayer(context), let song = controller.currentSong {
-            if song.entry.isEqual(to: parent) {
-                if playAnimationView == nil {
-                    playAnimationView = PeerMediaPlayerAnimationView()
-                    playAnimationView?.layer?.cornerRadius = 20
-                    imageView.addSubview(playAnimationView!)
-                }
-                if case .playing = song.state {
-                    playAnimationView?.isPlaying = true
-                } else if case .stoped = song.state {
-                    playAnimationView?.removeFromSuperview()
-                    playAnimationView = nil
-                } else  {
-                    playAnimationView?.isPlaying = false
-                }
-            } else {
-                playAnimationView?.removeFromSuperview()
-                playAnimationView = nil
-            }
+        if let parent = parent, let controller = ChatMediaUIHooks.shared.getAudioPlayer(context), let song = controller.currentSong, song.entry.isEqual(to: parent) {
+            updatePlaybackState(song.state)
         } else {
+            updatePlaybackState(nil)
+        }
+    }
+
+    func updatePlaybackState(_ state: APState?) {
+        switch state {
+        case .none, .stoped?:
             playAnimationView?.removeFromSuperview()
             playAnimationView = nil
+        default:
+            if playAnimationView == nil {
+                playAnimationView = PeerMediaPlayerAnimationView()
+                playAnimationView?.layer?.cornerRadius = 20
+                imageView.addSubview(playAnimationView!)
+            }
+            if case .playing? = state {
+                playAnimationView?.isPlaying = true
+            } else {
+                playAnimationView?.isPlaying = false
+            }
         }
+        updateFetchPresentation()
     }
     
     public override func preloadStreamblePart() {
