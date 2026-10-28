@@ -92,9 +92,92 @@ final class OutgoingChatTranslationTests: XCTestCase {
     }
 
     func testChineseScriptAliasesAndRegionalEnglish() {
-        XCTAssertFalse(canTranslateChatMessage(message(english), accountPeerId: accountId, toLang: "en-US"))
-        XCTAssertFalse(canTranslateChatMessage(message("明天我们一起去公园散步。"), accountPeerId: accountId, toLang: "zh-CN"))
-        XCTAssertFalse(canTranslateChatMessage(message("明天我們一起去公園散步。"), accountPeerId: accountId, toLang: "zh-TW"))
-        XCTAssertTrue(canTranslateChatMessage(message("明天我們一起去公園散步。"), accountPeerId: accountId, toLang: "zh-CN"))
+        for target in ["en", "en-US", "EN_us"] {
+            XCTAssertFalse(canTranslateChatMessage(message(english), accountPeerId: accountId, toLang: target), target)
+            XCTAssertTrue(canTranslateChatMessage(message(russian), accountPeerId: accountId, toLang: target), target)
+        }
+        for target in ["zh", "zh-CN", "zh-Hans", "ZH_hans_CN"] {
+            XCTAssertFalse(canTranslateChatMessage(message("明天我们一起去公园散步。"), accountPeerId: accountId, toLang: target), target)
+            XCTAssertTrue(canTranslateChatMessage(message("明天我們一起去公園散步。"), accountPeerId: accountId, toLang: target), target)
+        }
+        for target in ["zh-TW", "zh-Hant", "ZH_hant_TW", "zh-HK"] {
+            XCTAssertFalse(canTranslateChatMessage(message("明天我們一起去公園散步。"), accountPeerId: accountId, toLang: target), target)
+            XCTAssertTrue(canTranslateChatMessage(message(english), accountPeerId: accountId, toLang: target), target)
+        }
+    }
+
+    func testRecognizedLanguageAliases() {
+        for (text, targets) in [
+            ("Denne meldingen er allerede skrevet på norsk.", ["no", "nb", "nb-NO", "NB_no"]),
+            ("ההודעה הזאת כבר כתובה בשפה העברית.", ["he", "iw", "he-IL", "IW_il"])
+        ] {
+            for target in targets {
+                XCTAssertFalse(canTranslateChatMessage(message(text), accountPeerId: accountId, toLang: target), target)
+                XCTAssertTrue(canTranslateChatMessage(message(english), accountPeerId: accountId, toLang: target), target)
+            }
+        }
+    }
+
+    func testUnsupportedTargetsKeepAllOwnMessagesOriginal() {
+        for (text, targets) in [
+            ("Ova poruka je već napisana na srpskom jeziku.", ["sr", "sr-Latn", "SR_cyrl_RS"]),
+            ("Гэта паведамленне ўжо напісана на беларускай мове.", ["be", "be-BY", "BE_by"]),
+            ("Bu mesaj artıq Azərbaycan dilində yazılıb.", ["az", "az-Latn-AZ", "AZ_az"]),
+            ("Bu xabar allaqachon o‘zbek tilida yozilgan.", ["uz", "uz-Cyrl-UZ", "UZ_uz"]),
+            ("See sõnum on juba eesti keeles kirjutatud.", ["et", "et-EE", "ET_ee"]),
+            ("Ang mensaheng ito ay nakasulat na sa wikang Tagalog.", ["tl", "tl-PH", "TL_ph", "fil-PH"])
+        ] {
+            for target in targets {
+                for original in [text, english, russian, "OK", "12345"] {
+                    let outgoing = message(original)
+                    XCTAssertFalse(canTranslateChatMessage(outgoing, accountPeerId: accountId, toLang: target), target)
+                    XCTAssertNil(state(outgoing, to: target).translationResult(for: outgoing, accountPeerId: accountId), target)
+                }
+                let incoming = message(text, incoming: true)
+                XCTAssertTrue(canTranslateChatMessage(incoming, accountPeerId: accountId, toLang: target), target)
+                XCTAssertEqual(state(incoming, to: target).translationResult(for: incoming, accountPeerId: accountId), .loading(toLang: target), target)
+            }
+        }
+        for target in ["af", "bs", "eu", "und", "xx", ""] {
+            XCTAssertFalse(canTranslateChatMessage(message(english), accountPeerId: accountId, toLang: target), target)
+        }
+    }
+
+    func testUnsupportedTargetsSuppressCachedCaptionsAndTranscriptions() {
+        let image = TelegramMediaImage(imageId: MediaId(namespace: 0, id: 1), representations: [], immediateThumbnailData: nil, reference: nil, partialReference: nil, flags: [])
+        for target in ["sr", "be", "az", "uz", "et", "tl"] {
+            let translation = TranslationMessageAttribute(text: "Old translation", entities: [], toLang: target)
+            let caption = message(english, attributes: [translation], media: [image])
+            XCTAssertFalse(canTranslateChatMessage(caption, accountPeerId: accountId, toLang: target), target)
+            XCTAssertNil(state(caption, to: target).translationResult(for: caption, accountPeerId: accountId), target)
+            let incomingCaption = message(english, incoming: true, attributes: [translation], media: [image])
+            XCTAssertEqual(state(incomingCaption, to: target).translationResult(for: incomingCaption, accountPeerId: accountId), .complete(toLang: target), target)
+
+            let transcription = AudioTranscriptionMessageAttribute(id: 1, text: english, isPending: false, didRate: false, error: nil)
+            let outgoing = message("", attributes: [transcription])
+            XCTAssertFalse(canTranslateChatMessage(outgoing, accountPeerId: accountId, toLang: target, transcription: true), target)
+            var translated = state(outgoing, to: target)
+            XCTAssertNil(translated.transcriptionTranslationResult(for: outgoing, accountPeerId: accountId), target)
+            translated.transcriptionResult[.init(id: outgoing.id, toLang: target)] = .complete(toLang: target, text: "Old translation")
+            XCTAssertNil(translated.transcriptionTranslationResult(for: outgoing, accountPeerId: accountId), target)
+            let incoming = message("", incoming: true, attributes: [transcription])
+            XCTAssertTrue(canTranslateChatMessage(incoming, accountPeerId: accountId, toLang: target, transcription: true), target)
+            XCTAssertEqual(translated.transcriptionTranslationResult(for: incoming, accountPeerId: accountId), .complete(toLang: target, text: "Old translation"), target)
+        }
+    }
+
+    func testKazakhTargetRequiresMacOS13() {
+        for target in ["kk", "kk-KZ", "KK_kz"] {
+            let foreign = message(english)
+            if #available(macOS 13.0, *) {
+                XCTAssertTrue(canTranslateChatMessage(foreign, accountPeerId: accountId, toLang: target), target)
+                XCTAssertEqual(state(foreign, to: target).translationResult(for: foreign, accountPeerId: accountId), .loading(toLang: target), target)
+                XCTAssertFalse(canTranslateChatMessage(message("Бұл хабарлама қазақ тілінде жазылған."), accountPeerId: accountId, toLang: target), target)
+            } else {
+                XCTAssertFalse(canTranslateChatMessage(foreign, accountPeerId: accountId, toLang: target), target)
+                XCTAssertNil(state(foreign, to: target).translationResult(for: foreign, accountPeerId: accountId), target)
+            }
+            XCTAssertTrue(canTranslateChatMessage(message(english, incoming: true), accountPeerId: accountId, toLang: target), target)
+        }
     }
 }

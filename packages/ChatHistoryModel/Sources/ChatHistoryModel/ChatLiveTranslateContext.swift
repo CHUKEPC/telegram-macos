@@ -113,19 +113,50 @@ public func updateChatTranslationStateInteractively(engine: TelegramEngine, peer
 
 
 private func chatTranslationLanguageCode(_ code: String) -> String {
-    switch code {
-    case "zh", "zh-CN", "zh-Hans":
+    let components = code.replacingOccurrences(of: "_", with: "-").lowercased().components(separatedBy: "-")
+    let language = components.first ?? code
+    switch language {
+    case "zh":
+        if components.contains("hans") {
+            return "zh-CN"
+        }
+        if components.contains("hant") || components.contains("tw") || components.contains("hk") || components.contains("mo") {
+            return "zh-TW"
+        }
         return "zh-CN"
-    case "zh-TW", "zh-Hant":
-        return "zh-TW"
+    case "iw":
+        return "he"
     default:
-        return Translate.normalizeLanguageCode(code)
+        return Translate.normalizeLanguageCode(language)
     }
 }
+
+@available(macOS 10.14, *)
+private let chatTranslationRecognizableLanguages: Set<String> = {
+    var languages: [NLLanguage] = [
+        .amharic, .arabic, .armenian, .bengali, .bulgarian, .burmese,
+        .catalan, .cherokee, .croatian, .czech, .danish, .dutch,
+        .english, .finnish, .french, .georgian, .german, .greek,
+        .gujarati, .hebrew, .hindi, .hungarian, .icelandic, .indonesian,
+        .italian, .japanese, .kannada, .khmer, .korean, .lao,
+        .malay, .malayalam, .marathi, .mongolian, .norwegian, .oriya,
+        .persian, .polish, .portuguese, .punjabi, .romanian, .russian,
+        .simplifiedChinese, .sinhalese, .slovak, .spanish, .swedish,
+        .tamil, .telugu, .thai, .tibetan, .traditionalChinese, .turkish,
+        .ukrainian, .urdu, .vietnamese
+    ]
+    if #available(macOS 13.0, *) {
+        languages.append(.kazakh)
+    }
+    return Set(languages.map { chatTranslationLanguageCode($0.rawValue) })
+}()
 
 private func chatTranslationNeedsTranslation(_ texts: [String], toLang: String) -> Bool {
     let target = chatTranslationLanguageCode(toLang)
     guard #available(macOS 10.14, *) else {
+        return false
+    }
+    guard chatTranslationRecognizableLanguages.contains(target) else {
         return false
     }
     let recognizer = NLLanguageRecognizer()
