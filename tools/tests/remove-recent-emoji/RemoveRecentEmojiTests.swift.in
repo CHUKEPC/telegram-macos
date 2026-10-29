@@ -1,0 +1,324 @@
+import Cocoa
+import XCTest
+import SwiftSignalKit
+
+final class RemoveRecentEmojiTests: XCTestCase {
+    let pr117 = __PR117__
+    let a = MediaId(namespace: 1, id: 42)
+    let b = MediaId(namespace: 2, id: 42)
+    let c = MediaId(namespace: 1, id: 43)
+    let click = NSPoint(x: 20, y: 16)
+    let tone = EmojiSkinModifier(emoji: "👍", modifier: "🏿")
+
+    func settings(_ emoji: [String], animated: [MediaId] = [], modifiers: [EmojiSkinModifier] = []) -> RecentUsedEmoji {
+        RecentUsedEmoji(emojies: emoji, animated: animated, skinModifiers: modifiers)
+    }
+
+    func stored(_ value: RecentUsedEmoji) throws -> [String] {
+        let data = try JSONEncoder().encode(value)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try XCTUnwrap(object["e"] as? [String])
+    }
+
+    func assertStored(_ value: RecentUsedEmoji, _ expected: [String], file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertEqual(try stored(value).map { Array($0.utf8) }, expected.map { Array($0.utf8) }, file: file, line: line)
+    }
+
+    func reload(_ value: RecentUsedEmoji) throws -> RecentUsedEmoji {
+        try JSONDecoder().decode(RecentUsedEmoji.self, from: JSONEncoder().encode(value))
+    }
+
+    func menu(_ item: BuiltinMenu, at point: NSPoint? = nil) -> [ContextMenuItem] {
+        var result: [ContextMenuItem] = []
+        let disposable = item.menuItems(in: point ?? click).start(next: { result = $0 })
+        disposable.dispose()
+        return result
+    }
+
+    func testAllVariationSelectorsRemovedWithoutRewritingSurvivors() throws {
+        for emoji in ["✅", "😁"] {
+            let variants = (0...4).map { emoji + String(repeating: "\u{fe0f}", count: $0) }
+            let survivors = ["❤️", "👩🏽‍💻", "😁" == emoji ? "✅\u{fe0f}\u{fe0f}" : "😁\u{fe0f}\u{fe0f}", "🇺🇳"]
+            let original = settings([survivors[0]] + variants + Array(survivors.dropFirst()), animated: [a, b], modifiers: [tone])
+            let removed = original.removingEmoji(variants[2])
+            try assertStored(removed, survivors)
+            try assertStored(original, [survivors[0]] + variants + Array(survivors.dropFirst()))
+            XCTAssertEqual(removed.animated, [a, b])
+            XCTAssertEqual(removed.skinModifiers, [tone])
+        }
+    }
+
+    func testToneIsPartOfIdentity() throws {
+        let original = settings(["👍", "👍🏻", "👍🏿", "👍🏻\u{fe0f}", "😁"])
+        try assertStored(original.removingEmoji("👍🏻"), ["👍", "👍🏿", "😁"])
+        try assertStored(original.removingEmoji("👍"), ["👍🏻", "👍🏿", "👍🏻\u{fe0f}", "😁"])
+    }
+
+    func testLegacySkinModifierUsesActualDisplayedIdentity() throws {
+        let original = settings(["👍", "👍🏻", "😁"], animated: [a], modifiers: [tone])
+        XCTAssertEqual(original.emojies.first?.strippedEmoji, pr117 ? "👍" : "👍🏿")
+        let displayed = try XCTUnwrap(original.emojies.first)
+        let removed = original.removingEmoji(displayed)
+        try assertStored(removed, ["👍🏻", "😁"])
+        XCTAssertEqual(removed.skinModifiers, [tone])
+        XCTAssertEqual(removed.animated, [a])
+        if pr117 {
+            try assertStored(original.removingEmoji("👍🏿"), ["👍", "👍🏻", "😁"])
+        }
+    }
+
+    func testFullFamilyAndProfessionZWJIdentityPreservesOtherSequences() throws {
+        let family = "👨‍👩‍👧‍👦"
+        let sibling = "👨‍👩‍👦‍👦"
+        let profession = "👩🏽‍💻"
+        let original = settings([family, sibling, profession, "👩🏻‍💻", "👩", family + "\u{fe0f}"])
+        try assertStored(original.removingEmoji(family), [sibling, profession, "👩🏻‍💻", "👩"])
+        try assertStored(original.removingEmoji(profession), [family, sibling, "👩🏻‍💻", "👩", family + "\u{fe0f}"])
+    }
+
+    func testKeycapAndFlagIdentity() throws {
+        let original = settings(["1️⃣", "1\u{20e3}", "2️⃣", "🇺🇳", "🇺🇸", "🏳️‍🌈"])
+        try assertStored(original.removingEmoji("1️⃣"), ["2️⃣", "🇺🇳", "🇺🇸", "🏳️‍🌈"])
+        try assertStored(original.removingEmoji("🇺🇳"), ["1️⃣", "1\u{20e3}", "2️⃣", "🇺🇸", "🏳️‍🌈"])
+    }
+
+    func testMissingAndRepeatedRemovalAreSafe() throws {
+        let values = ["✅\u{fe0f}\u{fe0f}", "😁", "👍🏿"]
+        let original = settings(values, animated: [a, b], modifiers: [tone])
+        try assertStored(original.removingEmoji("🐳"), values)
+        try assertStored(original.removingEmoji(""), values)
+        XCTAssertEqual(original.removingAnimatedEmoji(c).animated, [a, b])
+        let once = original.removingEmoji("✅")
+        try assertStored(once.removingEmoji("✅"), stored(once))
+        XCTAssertEqual(once.removingEmoji("✅").skinModifiers, [tone])
+    }
+
+    func testCustomIdentityIncludesNamespaceAndRemovesEveryOccurrence() throws {
+        let original = settings(["✅\u{fe0f}\u{fe0f}", "😁"], animated: [a, b, a, c, a], modifiers: [tone])
+        let removed = original.removingAnimatedEmoji(a)
+        XCTAssertEqual(removed.animated, [b, c])
+        try assertStored(removed, stored(original))
+        XCTAssertEqual(removed.skinModifiers, [tone])
+        XCTAssertEqual(original.animated, [a, b, a, c, a])
+    }
+
+    func testRemovalSurvivesPersistenceRoundtrip() throws {
+        let original = try reload(settings(["✅", "😁", "👍🏿", "🇺🇳"], animated: [a, b], modifiers: [tone]))
+        XCTAssertTrue(original.emojies.contains { $0.strippedEmoji == "✅" })
+        let removed = original.removingEmoji("✅").removingAnimatedEmoji(a)
+        let loaded = try reload(removed)
+        XCTAssertFalse(try stored(loaded).contains { $0.strippedEmoji == "✅" })
+        XCTAssertEqual(loaded.emojies.map(\.strippedEmoji), removed.emojies.map(\.strippedEmoji))
+        XCTAssertEqual(loaded.animated, [b])
+        XCTAssertEqual(loaded.skinModifiers, [tone])
+    }
+
+    func testRemovingLastItemsKeepsEmptyLists() throws {
+        let original = settings(["✅", "✅\u{fe0f}"], animated: [a], modifiers: [tone])
+        let removed = original.removingEmoji("✅").removingAnimatedEmoji(a)
+        try assertStored(removed, [])
+        XCTAssertEqual(removed.animated, [])
+        XCTAssertEqual(removed.skinModifiers, [tone])
+        let loaded = try reload(removed)
+        XCTAssertEqual(loaded.emojies, [])
+        XCTAssertEqual(loaded.animated, [])
+    }
+
+    func testUnicodeTransactionReadsLatestEntryAtSubscription() throws {
+        let postbox = Postbox(settings(["✅", "😁"], animated: [a]))
+        let pending = removeUsedEmoji("✅", postbox: postbox)
+        XCTAssertEqual(postbox.transactions, 0)
+        postbox.replace(settings(["🐳", "✅\u{fe0f}", "😁"], animated: [b, a], modifiers: [tone]))
+        _ = pending.start()
+        XCTAssertEqual(postbox.transactions, 1)
+        try assertStored(postbox.current, ["🐳", "😁"])
+        XCTAssertEqual(postbox.current.animated, [b, a])
+        XCTAssertEqual(postbox.current.skinModifiers, [tone])
+    }
+
+    func testAnimatedTransactionReadsLatestEntryAtSubscription() throws {
+        let postbox = Postbox(settings(["✅"], animated: [a]))
+        let pending = removeAnimatedUsedEmoji(a, postbox: postbox)
+        postbox.replace(settings(["🐳", "✅\u{fe0f}\u{fe0f}"], animated: [b, a, c], modifiers: [tone]))
+        _ = pending.start()
+        XCTAssertEqual(postbox.current.animated, [b, c])
+        try assertStored(postbox.current, ["🐳", "✅\u{fe0f}\u{fe0f}"])
+        XCTAssertEqual(postbox.current.skinModifiers, [tone])
+    }
+
+    func testMissingPreferenceUsesDefaultsInsteadOfOverwritingEmpty() throws {
+        let unicode = Postbox()
+        _ = removeUsedEmoji("😁", postbox: unicode).start()
+        try assertStored(unicode.current, stored(RecentUsedEmoji.defaultSettings).filter { $0 != "😁" })
+        let animated = Postbox()
+        _ = removeAnimatedUsedEmoji(a, postbox: animated).start()
+        try assertStored(animated.current, stored(RecentUsedEmoji.defaultSettings))
+        XCTAssertEqual(animated.current.animated, [])
+    }
+
+    func testAnimatedOnlyChangePassesRealStatePromiseEqualityGate() {
+        struct State: Equatable { let recent: RecentUsedEmoji }
+        let before = settings(["😁"], animated: [a, b])
+        let after = before.removingAnimatedEmoji(a)
+        XCTAssertNotEqual(before, after)
+        XCTAssertNotEqual(before, settings(["😁"], animated: [b, a]))
+        let promise = ValuePromise<State>(ignoreRepeated: true)
+        var states: [State] = []
+        let disposable = promise.get().start(next: { states.append($0) })
+        promise.set(State(recent: before))
+        promise.set(State(recent: settings(["😁"], animated: [a, b])))
+        promise.set(State(recent: after))
+        XCTAssertEqual(states.count, 2)
+        XCTAssertEqual(states.last?.recent.animated, [b])
+        disposable.dispose()
+    }
+
+    func testFourSendReloadCyclesExposeBaseDuplicatesAndPR117Collapse() throws {
+        for emoji in ["✅", "😁"] {
+            let postbox = Postbox(settings([emoji]))
+            var counts: [Int] = []
+            for _ in 0..<4 {
+                _ = saveUsedEmoji([emoji], postbox: postbox).start()
+                postbox.replace(try reload(postbox.current))
+                counts.append(postbox.current.emojies.filter { $0.strippedEmoji == emoji }.count)
+            }
+            print("Send/reload \(emoji): \(counts); PR117=\(pr117)")
+            if pr117 {
+                XCTAssertEqual(counts, [1, 1, 1, 1])
+            } else {
+                XCTAssertGreaterThan(counts.last ?? 0, counts.first ?? 0)
+            }
+            _ = removeUsedEmoji(emoji, postbox: postbox).start()
+            postbox.replace(try reload(postbox.current))
+            XCTAssertFalse(postbox.current.emojies.contains { $0.strippedEmoji == emoji })
+        }
+    }
+
+    func testBuiltinMenuCapturesClickedIdentityWithoutSending() throws {
+        let view = EBlockRowView(["✅\u{fe0f}", "😁"])
+        view.emojiUnderMouse = "😁"
+        var removed: [String] = []
+        var sends = 0
+        let item = BuiltinMenu(view: view, removeRecent: { removed.append($0) })
+        item.selectHandler = { _, _ in sends += 1 }
+        let items = menu(item)
+        XCTAssertEqual(items.map(\.title), [strings().searchRemoveFromRecent])
+        XCTAssertTrue(removed.isEmpty)
+        XCTAssertEqual(sends, 0)
+        view.lines.removeAll()
+        view.emojiUnderMouse = "🐳"
+        let action = try XCTUnwrap(items.last)
+        XCTAssertEqual(action.itemMode, .destruct)
+        action.handler()
+        XCTAssertEqual(removed.map { Array($0.utf8) }, [Array("✅\u{fe0f}".utf8)])
+        XCTAssertEqual(sends, 0)
+        XCTAssertEqual(item.account.postbox.transactions, 0)
+    }
+
+    func testSkinToneMenuRetainsExistingActionAndRemovalUsesOriginalTone() throws {
+        let view = EBlockRowView(["👍🏿"])
+        var removed: [String] = []
+        let item = BuiltinMenu(view: view, removeRecent: { removed.append($0) })
+        let items = menu(item)
+        XCTAssertEqual(items.map(\.title), ["skin-tone", "separator", strings().searchRemoveFromRecent])
+        let skin = try XCTUnwrap(items.first as? EmojiToleranceContextMenuItem)
+        XCTAssertEqual(skin.emoji, "👍")
+        items.last?.handler()
+        XCTAssertEqual(removed, ["👍🏿"])
+        XCTAssertEqual(item.account.postbox.transactions, 0)
+        skin.callback("🏻")
+        XCTAssertEqual(item.account.postbox.current.skinModifiers, [EmojiSkinModifier(emoji: "👍", modifier: "🏻")])
+    }
+
+    func testSearchAndCategoryWithoutCallbackDoNotOfferRemoval() {
+        for label in ["search using Recent segment", "ordinary category"] {
+            let plain = BuiltinMenu(view: EBlockRowView(["😁"]))
+            XCTAssertTrue(menu(plain).isEmpty, label)
+            let skin = BuiltinMenu(view: EBlockRowView(["👍"]))
+            XCTAssertEqual(menu(skin).map(\.title), ["skin-tone"], label)
+        }
+    }
+
+    func testLastOrdinaryRemovalKeepsCustomRecentSectionOnlyInEmojiAndStories() {
+        let customOnly = settings(["✅"], animated: [a]).removingEmoji("✅")
+        let empty = customOnly.removingAnimatedEmoji(a)
+        let rendered = segments([.Recent: customOnly.emojies, .People: ["😁"]], skinModifiers: [])
+        XCTAssertNil(rendered[.Recent])
+        for mode in PickerMode.allCases {
+            let list = recentSegmentList(rendered, state: SegmentState(recent: customOnly), arguments: SegmentArguments(mode: mode))
+            XCTAssertEqual(list, mode == .emoji || mode == .stories ? [.Recent, .People] : [.People])
+            XCTAssertEqual(recentSegmentList(rendered, state: SegmentState(recent: empty), arguments: SegmentArguments(mode: mode)), [.People])
+            XCTAssertEqual(recentSegmentList([:], state: SegmentState(recent: empty), arguments: SegmentArguments(mode: mode)), [])
+        }
+        let alreadyPresent = segments([.Recent: ["✅"], .People: ["😁"]], skinModifiers: [])
+        XCTAssertEqual(recentSegmentList(alreadyPresent, state: SegmentState(recent: customOnly), arguments: SegmentArguments(mode: .emoji)), [.Recent, .People])
+    }
+
+    func testRendererSourceIdentityAndReusedVisualLayer() throws {
+        let raw = "👍\u{fe0f}"
+        let original = settings([raw, "👍🏻", "😁"], modifiers: [tone])
+        let rendered = segments([.Recent: original.emojies, .People: [raw]], skinModifiers: [tone])
+        let first = try XCTUnwrap(rendered[.Recent]?.first?.first)
+        XCTAssertEqual(first.string.strippedEmoji, pr117 ? "👍" : "👍🏿")
+        XCTAssertEqual(first.attribute(recentEmojiSourceKey, at: 0, effectiveRange: nil) as? String, raw)
+        XCTAssertNil(rendered[.People]?.first?.first?.attribute(recentEmojiSourceKey, at: 0, effectiveRange: nil))
+        if !pr117 {
+            print("Legacy renderer: source=\(raw.unicodeScalars.map(\.value)), displayed=\(first.string); direct displayed removal leaves \(try stored(original.removingEmoji(first.string)).count) entries")
+        }
+        let view = EBlockRowView(attributed: [first])
+        let postbox = Postbox(original)
+        var captured: [String] = []
+        let item = BuiltinMenu(view: view, removeRecent: { value in
+            captured.append(value)
+            _ = removeUsedEmoji(value, postbox: postbox).start()
+        })
+        let remove = try XCTUnwrap(menu(item).last)
+        remove.handler()
+        try assertStored(postbox.current, ["👍🏻", "😁"])
+        XCTAssertEqual(captured, [raw])
+        let refreshed = NSMutableAttributedString(attributedString: first)
+        refreshed.addAttribute(recentEmojiSourceKey, value: "👍🏻", range: NSRange(location: 0, length: refreshed.length))
+        view.item = EBlockItem([refreshed])
+        XCTAssertEqual(view.lines.values.first?.emoji.string, refreshed.string)
+        XCTAssertEqual(view.lines.values.first?.emoji.attribute(recentEmojiSourceKey, at: 0, effectiveRange: nil) as? String, raw)
+        try XCTUnwrap(menu(item).last).handler()
+        XCTAssertEqual(captured, [raw, "👍🏻"])
+        try assertStored(postbox.current, ["😁"])
+        view.item = EBlockItem([])
+        XCTAssertTrue(menu(item).isEmpty)
+    }
+
+    func testBuiltinHitTestingRejectsMarginsGapsAndMissingView() {
+        let item = BuiltinMenu(view: EBlockRowView(["😁", "✅"]), removeRecent: { _ in XCTFail("Unexpected removal") })
+        for point in [NSPoint(x: 2, y: 16), NSPoint(x: 48, y: 16), NSPoint(x: 20, y: 3), NSPoint(x: 130, y: 16)] {
+            XCTAssertTrue(menu(item, at: point).isEmpty)
+        }
+        XCTAssertEqual(menu(item, at: NSPoint(x: 60, y: 16)).count, 1)
+        item.view = nil
+        XCTAssertTrue(menu(item).isEmpty)
+    }
+
+    func testAnimatedMenuCapturesClickedMediaAndNeverSends() throws {
+        let view = EmojiesSectionRowView([a, b])
+        view.itemUnderMouse = StickerPackItem(file: TelegramMediaFile(fileId: b))
+        var removed: [MediaId] = []
+        var sends = 0
+        let item = AnimatedRemovalMenu(view: view, removeRecent: { removed.append($0) })
+        item.callback = { _ in sends += 1 }
+        let items = item.menuItems(in: click)
+        XCTAssertEqual(items.map(\.title), [strings().searchRemoveFromRecent])
+        XCTAssertTrue(removed.isEmpty)
+        view.item = EmojiesSectionRowItem([c])
+        view.itemUnderMouse = StickerPackItem(file: TelegramMediaFile(fileId: c))
+        let action = try XCTUnwrap(items.first)
+        XCTAssertEqual(action.itemMode, .destruct)
+        action.handler()
+        XCTAssertEqual(removed, [a])
+        XCTAssertEqual(sends, 0)
+        for point in [NSPoint(x: 2, y: 16), NSPoint(x: 48, y: 16), NSPoint(x: 20, y: 3)] {
+            XCTAssertTrue(item.menuItems(in: point).isEmpty)
+        }
+        item.removeRecent = nil
+        XCTAssertTrue(item.menuItems(in: click).isEmpty)
+    }
+}
