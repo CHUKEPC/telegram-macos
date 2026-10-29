@@ -1268,7 +1268,7 @@ public final class ForwardMessagesObject : ShareObject {
                     
                     let navigation = self.context.bindings.rootNavigation()
                     if let peerId = peerIds.first {
-                        if peerId == context.peerId {
+                        if peerId == context.peerId, !messageIds.contains(where: { $0.peerId == context.peerId }) {
                             let commentResult: Signal<[MessageId?], NoError>
                             let expectedCommentCount: Int
                             if let comment = comment, !comment.inputText.isEmpty {
@@ -1309,10 +1309,11 @@ public final class ForwardMessagesObject : ShareObject {
                             |> ignoreValues
                             |> castError(String.self)
                         } else if let peer = peer, !peer.isCommunity {
-                            
+
                             let comment = peer.canSendMessage() ? comment : nil
-                            
-                            if threadId == nil, let controller = navigation.controller as? ChatInterfaceController, controller.chatInteraction.chatLocation == .peer(peerId) {
+                            let threadId = peerId == context.peerId ? nil : threadId
+
+                            if threadId == nil, let controller = navigation.controller as? ChatInterfaceController, controller.chatInteraction.chatLocation == .peer(peerId), peerId != context.peerId || (controller.chatInteraction.mode == .history && controller.chatInteraction.presentation.withoutSelectionState().state == .normal) {
                                 controller.chatInteraction.update({ current in
                                     current.withoutSelectionState().updatedInterfaceState {
                                         $0.withUpdatedForwardMessageIds(messageIds).withUpdatedInputState(comment ?? current.effectiveInput)
@@ -1322,7 +1323,7 @@ public final class ForwardMessagesObject : ShareObject {
                             } else {
                                 
                                 let initialAction: ChatInitialAction = .forward(messageIds: messageIds, text: comment, behavior: .automatic)
-                                
+
                                 if let threadId = threadId {
                                     return ForumUI.openTopic(threadId, peerId: peerId, context: context, animated: true, addition: true, initialAction: initialAction, isMonoforum: peer.isMonoForum) |> filter {$0}
                                     |> take(1)
