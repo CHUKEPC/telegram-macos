@@ -980,6 +980,35 @@ public class ChatControllerView : View, ChatInputDelegate {
         return tableRect
     }
 
+    private var headerHeight: CGFloat {
+        return inlineHeaderFrame(for: frame.width) == nil ? header.state.height : 0
+    }
+
+    private func inlineHeaderFrame(for width: CGFloat) -> NSRect? {
+        guard header.state.canDisplayInline, let frame = bubblesView.inlineHeaderFrame(for: width) else {
+            return nil
+        }
+        if case .search = header.state.main, frame.width < ChatHeaderInlineLayout.minimumSearchAccessoryWidth {
+            return nil
+        }
+        return frame
+    }
+
+    private var previousHeaderInsets: (stick: CGFloat, content: CGFloat)?
+
+    private func updateHeaderInsets(width: CGFloat, animated: Bool) {
+        let height = inlineHeaderFrame(for: width) == nil ? header.state.height : 0
+        let bubbleHeight = ChatHeaderBubblesView.totalHeight
+        let stick = bubbleHeight + height - header.state.toleranceHeight + 10
+        let content = bubbleHeight + ((chatInteraction.presentation.historyCount ?? 0) > 0 ? height : 0)
+        guard previousHeaderInsets?.stick != stick || previousHeaderInsets?.content != content else {
+            return
+        }
+        previousHeaderInsets = (stick, content)
+        tableView.updateStickInset(stick, animated: animated)
+        tableView.contentInsets = .init(top: content)
+    }
+
     private var currentHeaderInset: CGFloat = 0
     private var navigationOverflow: CGFloat = 0
     private var hasLayout: Bool = false
@@ -1009,7 +1038,11 @@ public class ChatControllerView : View, ChatInputDelegate {
 
         let bubbleBarHeight: CGFloat = ChatHeaderBubblesView.totalHeight
 
-        bubblesView.extendedContentHeight = header.state.height
+        let inlineFrame = inlineHeaderFrame(for: frame.width)
+        let headerHeight = inlineFrame == nil ? header.state.height : 0
+        bubblesView.displaysInlineHeader = inlineFrame != nil
+        bubblesView.extendedContentHeight = headerHeight
+        updateHeaderInsets(width: frame.width, animated: transition.isAnimated)
         let bubblesFrame = NSMakeRect(headerInset.x, navigationOverflow, frame.width - headerInset.x, bubbleBarHeight)
         transition.updateFrame(view: bubblesView, frame: bubblesFrame)
         bubblesView.updateLayout(size: bubblesFrame.size, transition: transition)
@@ -1017,11 +1050,11 @@ public class ChatControllerView : View, ChatInputDelegate {
         let edgeBg = edgeEffectColor()
         let bubbleShadowExtra: CGFloat = 24
         let bubbleShadowTopExtend: CGFloat = max(100, inset)
-        let bubbleShadowBottom = navigationOverflow + bubbleBarHeight + header.state.height + bubbleShadowExtra
+        let bubbleShadowBottom = navigationOverflow + bubbleBarHeight + headerHeight + bubbleShadowExtra
         let shadowX: CGFloat = -self.frame.minX
         let shadowWidth: CGFloat = (superview?.frame.width).map { max($0, self.frame.width) } ?? self.frame.width
         let bubbleShadowRect = NSMakeRect(shadowX, -bubbleShadowTopExtend, shadowWidth, bubbleShadowBottom + bubbleShadowTopExtend)
-        let listTopInset = navigationOverflow + bubbleBarHeight + header.state.height
+        let listTopInset = navigationOverflow + bubbleBarHeight + headerHeight
         let bubbleBlur = EdgeEffectView.Blur(rect: NSMakeRect(shadowX, bubbleShadowRect.minY, shadowWidth, listTopInset + 10 - bubbleShadowRect.minY), edgeSize: 80)
         transition.updateFrame(view: bubbleShadowView, frame: bubbleShadowRect)
         bubbleShadowView.update(color: edgeBg, blur: ChatControllerView.edgeBlur.contains(.top) ? bubbleBlur : nil, alpha: 0.6, edge: .bottom, edgeSize: min(60, bubbleShadowRect.height), rect: bubbleShadowRect, transition: transition)
@@ -1039,10 +1072,13 @@ public class ChatControllerView : View, ChatInputDelegate {
                 inset += 12 + monoforum_VerticalView.frame.width
             }
             
-            header.measure(frame.width - inset - headerEdge * 2)
+            let headerFrame = inlineFrame?.offsetBy(dx: headerInset.x, dy: navigationOverflow)
+                ?? NSMakeRect(inset + headerEdge, bubblesView.frame.maxY, frame.width - inset - headerEdge * 2, headerHeight)
+            header.measure(headerFrame.width)
 
-            transition.updateFrame(view: currentView, frame: NSMakeRect(inset + headerEdge, bubblesView.frame.maxY, frame.width - inset - headerEdge * 2, header.state.height))
-            header.updateLayout(size: currentView.frame.size, transition: transition)
+            let headerTransition: ContainedViewLayoutTransition = header.hasLayout ? transition : .immediate
+            headerTransition.updateFrame(view: currentView, frame: headerFrame)
+            header.updateLayout(size: currentView.frame.size, transition: headerTransition)
         }
         
         let inputHeight = inputView.height(for: frame.width)
@@ -1128,11 +1164,11 @@ public class ChatControllerView : View, ChatInputDelegate {
         }
         
         if let starUndoView {
-            transition.updateFrame(view: starUndoView, frame: starUndoView.centerFrameX(y: navigationOverflow + bubbleBarHeight + header.state.height + 10))
+            transition.updateFrame(view: starUndoView, frame: starUndoView.centerFrameX(y: navigationOverflow + bubbleBarHeight + headerHeight + 10))
         }
 
         if let videoProccesing {
-            transition.updateFrame(view: videoProccesing, frame: videoProccesing.centerFrameX(y: navigationOverflow + bubbleBarHeight + header.state.height + 10))
+            transition.updateFrame(view: videoProccesing, frame: videoProccesing.centerFrameX(y: navigationOverflow + bubbleBarHeight + headerHeight + 10))
         }
         
         if let monoforum_VerticalView {
@@ -1332,7 +1368,7 @@ public class ChatControllerView : View, ChatInputDelegate {
         } else {
             translate = nil
         }
-        
+
         let botAd: Message? = (interfaceState.historyCount ?? 0) >= 2 ? interfaceState.adMessage : nil
         
              
@@ -1340,19 +1376,12 @@ public class ChatControllerView : View, ChatInputDelegate {
 
         state.measure(frame.width - (interfaceState.monoforumState == .vertical ? 92 : 0) - 24)
 
-        header.updateState(state, animated: animated, for: self, inset: interfaceState.monoforumState == .vertical ? 92 : 0, relativeView: header.monoforumView)
+        header.updateState(state, animated: animated, for: self, inset: interfaceState.monoforumState == .vertical ? 92 : 0, relativeView: header.monoforumView, mergeGlassOnRemoval: bubblesView.displaysInlineHeader)
 
-        let bubbleBarHeight = ChatHeaderBubblesView.totalHeight
-
-        tableView.updateStickInset(bubbleBarHeight + state.height - state.toleranceHeight + 10, animated: animated)
+        updateHeaderInsets(width: frame.width, animated: animated)
 
         if superview != nil {
             updateFrame(frame, transition: animated ? .animated(duration: 0.2, curve: .easeOut) : .immediate)
-        }
-        if let count = interfaceState.historyCount, count > 0 {
-            tableView.contentInsets = .init(top: bubbleBarHeight + state.height)
-        } else {
-            tableView.contentInsets = .init(top: bubbleBarHeight)
         }
     }
     
@@ -1626,7 +1655,7 @@ public class ChatControllerView : View, ChatInputDelegate {
             context.engine.messages.cancelPendingSendStarsReaction(id: messageId)
         })
         
-        let rect = self.frame.focusX(size, y: ChatHeaderBubblesView.totalHeight + header.state.height + 10)
+        let rect = self.frame.focusX(size, y: ChatHeaderBubblesView.totalHeight + headerHeight + 10)
         let transition: ContainedViewLayoutTransition = animated ? .animated(duration: 0.2, curve: .easeOut) : .immediate
         transition.updateFrame(view: current, frame: rect)
 
@@ -1658,7 +1687,7 @@ public class ChatControllerView : View, ChatInputDelegate {
             }
         })
         
-        let rect = self.frame.focusX(size, y: ChatHeaderBubblesView.totalHeight + header.state.height + 10)
+        let rect = self.frame.focusX(size, y: ChatHeaderBubblesView.totalHeight + headerHeight + 10)
         let transition: ContainedViewLayoutTransition = animated ? .animated(duration: 0.2, curve: .easeOut) : .immediate
         transition.updateFrame(view: current, frame: rect)
         
@@ -1675,7 +1704,7 @@ public class ChatControllerView : View, ChatInputDelegate {
         guard let view = toasterView else { return .zero }
         let maxWidth = max(80, frame.width - 24)
         let size = view.contentSize(maxWidth: maxWidth)
-        let y = ChatHeaderBubblesView.totalHeight + header.state.height
+        let y = ChatHeaderBubblesView.totalHeight + headerHeight
         return frame.focusX(size, y: y)
     }
 
@@ -1697,7 +1726,7 @@ public class ChatControllerView : View, ChatInputDelegate {
         let maxWidth = max(80, frame.width - 24)
         view.update(text: text, animation: animation, context: context, maxWidth: maxWidth)
         let size = view.contentSize(maxWidth: maxWidth)
-        let y = ChatHeaderBubblesView.totalHeight + header.state.height + 8
+        let y = ChatHeaderBubblesView.totalHeight + headerHeight + 8
         view.frame = frame.focusX(size, y: y)
         self.toasterView = view
 
@@ -10244,6 +10273,13 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
             break
         }
 
+        if let translation = chatTranslationMenuItem(chatInteraction: chatInteraction) {
+            if !items.isEmpty {
+                items.insert(ContextSeparatorItem(), at: 0)
+            }
+            items.insert(translation, at: 0)
+        }
+
         guard !items.isEmpty else {
             return nil
         }
@@ -11663,8 +11699,8 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
             
             
             if value.searchMode != oldValue.searchMode || value.pinnedMessageId != oldValue.pinnedMessageId || value.peerStatus != oldValue.peerStatus || value.interfaceState.dismissedPinnedMessageId != oldValue.interfaceState.dismissedPinnedMessageId || value.initialAction != oldValue.initialAction || value.restrictionInfo != oldValue.restrictionInfo || value.hidePinnedMessage != oldValue.hidePinnedMessage || value.groupCall != oldValue.groupCall || value.reportMode != oldValue.reportMode || value.inviteRequestsPendingPeers != oldValue.inviteRequestsPendingPeers || value.threadInfo?.isClosed != oldValue.threadInfo?.isClosed || value.translateState != oldValue.translateState || value.savedMessageTags != oldValue.savedMessageTags || value.connectedBot != oldValue.connectedBot || value.adMessage != oldValue.adMessage || value.historyCount != oldValue.historyCount || value.monoforumState != oldValue.monoforumState || value.removePaidMessageFeeData != oldValue.removePaidMessageFeeData || value.chatLocation.threadId != oldValue.chatLocation.threadId || value.managedBotNeedsPhoto != oldValue.managedBotNeedsPhoto {
-                genericView.updateHeader(value, animated, value.hidePinnedMessage != oldValue.hidePinnedMessage)
                 genericView.bubblesView.updatePresentation(value, force: true)
+                genericView.updateHeader(value, animated, value.hidePinnedMessage != oldValue.hidePinnedMessage)
             }
             
             if value.chatLocation != oldValue.chatLocation {
