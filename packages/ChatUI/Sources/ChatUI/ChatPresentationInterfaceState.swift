@@ -287,8 +287,8 @@ public class ChatPresentationInterfaceState: Equatable {
         public var paywall: Bool
         public var tone: TranslationTone = .neutral
         public var result:[ChatLiveTranslateContext.State.Key : ChatLiveTranslateContext.State.Result]
-        public var translationEligibility: [ChatLiveTranslateContext.State.Key: UInt32]
-        public init(canTranslate: Bool, translate: Bool, from: String? = nil, to: String, paywall: Bool, tone: TranslationTone = .neutral, result: [ChatLiveTranslateContext.State.Key : ChatLiveTranslateContext.State.Result], translationEligibility: [ChatLiveTranslateContext.State.Key: UInt32] = [:]) {
+        public var translationEligibility: [ChatLiveTranslateContext.State.Key: ChatTranslationSource]
+        public init(canTranslate: Bool, translate: Bool, from: String? = nil, to: String, paywall: Bool, tone: TranslationTone = .neutral, result: [ChatLiveTranslateContext.State.Key : ChatLiveTranslateContext.State.Result], translationEligibility: [ChatLiveTranslateContext.State.Key: ChatTranslationSource] = [:]) {
             self.canTranslate = canTranslate
             self.translate = translate
             self.from = from
@@ -309,7 +309,7 @@ public class ChatPresentationInterfaceState: Equatable {
             }
             let key = ChatLiveTranslateContext.State.Key(id: message.id, toLang: to)
             if message.author?.id == accountPeerId || !message.effectivelyIncoming(accountPeerId) {
-                guard translationEligibility[key] == message.stableVersion else {
+                guard translationEligibility[key] == ChatTranslationSource(message) else {
                     return nil
                 }
             }

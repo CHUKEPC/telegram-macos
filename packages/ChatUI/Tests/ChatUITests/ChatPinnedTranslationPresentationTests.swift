@@ -8,8 +8,8 @@ final class ChatPinnedTranslationPresentationTests: XCTestCase {
     private let accountId = PeerId(namespace: Namespaces.Peer.CloudUser, id: ._internalFromInt64Value(1))
     private let chatId = PeerId(namespace: Namespaces.Peer.CloudUser, id: ._internalFromInt64Value(2))
 
-    private func message(incoming: Bool = false, version: UInt32 = 0) -> Message {
-        return Message(stableId: 1, stableVersion: version, id: MessageId(peerId: chatId, namespace: Namespaces.Message.Cloud, id: 1), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: 0, flags: incoming ? [.Incoming] : [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: nil, text: "Pinned text", attributes: [], media: [], peers: SimpleDictionary(), associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
+    private func message(_ text: String = "Pinned text", incoming: Bool = false, version: UInt32 = 0, attributes: [MessageAttribute] = []) -> Message {
+        return Message(stableId: 1, stableVersion: version, id: MessageId(peerId: chatId, namespace: Namespaces.Message.Cloud, id: 1), globallyUniqueId: nil, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: 0, flags: incoming ? [.Incoming] : [], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: nil, text: text, attributes: attributes, media: [], peers: SimpleDictionary(), associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
     }
 
     private func state(for message: Message) -> ChatLiveTranslateContext.State {
@@ -26,7 +26,7 @@ final class ChatPinnedTranslationPresentationTests: XCTestCase {
         var source = state(for: pinned)
         let before = ChatPresentationInterfaceState.TranslateState(source)
         XCTAssertNil(before.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
-        source.translationEligibility[.init(id: pinned.id, toLang: "en")] = pinned.stableVersion
+        source.translationEligibility[.init(id: pinned.id, toLang: "en")] = ChatTranslationSource(pinned)
         let after = ChatPresentationInterfaceState.TranslateState(source)
         XCTAssertNotEqual(before, after)
         XCTAssertEqual(after.translationEligibility, source.translationEligibility)
@@ -35,12 +35,24 @@ final class ChatPinnedTranslationPresentationTests: XCTestCase {
         XCTAssertEqual(ChatPresentationInterfaceState.TranslateState(source).pinnedTranslationResult(for: pinned, accountPeerId: accountId), .complete(toLang: "en"))
     }
 
-    func testProjectionRejectsStaleVersionsTargetsAndDisabledState() {
+    func testOwnPinnedTranslationSurvivesVersionOnlyRefreshWithoutCollectionPass() {
         let pinned = message()
         var source = state(for: pinned)
-        source.translationEligibility[.init(id: pinned.id, toLang: "en")] = 0
+        source.translationEligibility[.init(id: pinned.id, toLang: "en")] = ChatTranslationSource(pinned)
+        for result: ChatLiveTranslateContext.State.Result in [.loading(toLang: "en"), .complete(toLang: "en")] {
+            source.result[.init(id: pinned.id, toLang: "en")] = result
+            let projected = ChatPresentationInterfaceState.TranslateState(source)
+            XCTAssertEqual(projected.pinnedTranslationResult(for: message(version: 1), accountPeerId: accountId), result)
+            XCTAssertEqual(projected.pinnedTranslationResult(for: message(version: 9), accountPeerId: accountId), result)
+        }
+    }
+
+    func testProjectionRejectsChangedContentTargetsAndDisabledState() {
+        let pinned = message()
+        var source = state(for: pinned)
+        source.translationEligibility[.init(id: pinned.id, toLang: "en")] = ChatTranslationSource(pinned)
         var projected = ChatPresentationInterfaceState.TranslateState(source)
-        XCTAssertNil(projected.pinnedTranslationResult(for: message(version: 1), accountPeerId: accountId))
+        XCTAssertNil(projected.pinnedTranslationResult(for: message("Edited text", version: 1), accountPeerId: accountId))
         projected.to = "ru"
         projected.result[.init(id: pinned.id, toLang: "ru")] = .complete(toLang: "ru")
         XCTAssertNil(projected.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
@@ -52,12 +64,35 @@ final class ChatPinnedTranslationPresentationTests: XCTestCase {
         XCTAssertNil(projected.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
     }
 
+    func testEntityEditRequiresFreshEligibility() {
+        let pinned = message()
+        var source = state(for: pinned)
+        source.translationEligibility[.init(id: pinned.id, toLang: "en")] = ChatTranslationSource(pinned)
+        let edited = message(version: 1, attributes: [TextEntitiesMessageAttribute(entities: [MessageTextEntity(range: 0..<6, type: .Bold)])])
+        XCTAssertNil(ChatPresentationInterfaceState.TranslateState(source).pinnedTranslationResult(for: edited, accountPeerId: accountId))
+        source.translationEligibility[.init(id: edited.id, toLang: "en")] = ChatTranslationSource(edited)
+        XCTAssertEqual(ChatPresentationInterfaceState.TranslateState(source).pinnedTranslationResult(for: edited, accountPeerId: accountId), .loading(toLang: "en"))
+    }
+
+    func testRichTextEditsInvalidateButViewCountsDoNot() {
+        func rich(_ text: String, views: Int32) -> Message {
+            let page = InstantPage(blocks: [.paragraph(.plain(text))], media: [:], isComplete: true, rtl: false, url: "", views: views)
+            return message("", version: UInt32(views), attributes: [RichTextMessageAttribute(instantPage: page, fullInstantPage: nil)])
+        }
+        let pinned = rich("Original rich text", views: 1)
+        var source = state(for: pinned)
+        source.translationEligibility[.init(id: pinned.id, toLang: "en")] = ChatTranslationSource(pinned)
+        let projected = ChatPresentationInterfaceState.TranslateState(source)
+        XCTAssertEqual(projected.pinnedTranslationResult(for: rich("Original rich text", views: 2), accountPeerId: accountId), .loading(toLang: "en"))
+        XCTAssertNil(projected.pinnedTranslationResult(for: rich("Edited rich text", views: 2), accountPeerId: accountId))
+    }
+
     func testIncomingPinsRetainLookupWithoutOutgoingEligibility() {
         let pinned = message(incoming: true)
         let source = state(for: pinned)
         let projected = ChatPresentationInterfaceState.TranslateState(source)
         XCTAssertTrue(projected.translationEligibility.isEmpty)
         XCTAssertEqual(projected.pinnedTranslationResult(for: pinned, accountPeerId: accountId), .loading(toLang: "en"))
-        XCTAssertEqual(projected.pinnedTranslationResult(for: pinned, accountPeerId: accountId), source.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
+        XCTAssertEqual(projected.pinnedTranslationResult(for: message(incoming: true, version: 1), accountPeerId: accountId), .loading(toLang: "en"))
     }
 }

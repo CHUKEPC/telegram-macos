@@ -1058,7 +1058,7 @@ class ChatPinnedView : Control, ChatHeaderProtocol {
         self.dismiss.set(image: pinnedMessage.totalCount <= 1 ? theme.icons.chat_header_dismiss : theme.icons.chat_header_pinned_list, for: .Normal)
         self.dismiss.setAccessibilityLabel(pinnedMessage.totalCount <= 1 ? strings().voiceOverCommonClose : strings().chatTitlePinnedMessagesOther(Int(pinnedMessage.totalCount)))
         
-        if pinnedMessage.messageId != self.pinnedMessage?.messageId || translate != self.translate {
+        if pinnedMessage.messageId != self.pinnedMessage?.messageId || pinnedMessage.message?.stableVersion != self.pinnedMessage?.message?.stableVersion || translate != self.translate {
             let oldContainer = self.container
             let newContainer = ChatAccessoryView()
             newContainer.userInteractionEnabled = false

@@ -192,7 +192,7 @@ final class OutgoingChatTranslationTests: XCTestCase {
             translated.translationEligibility = batch.eligibility
             XCTAssertEqual(translated.replyTranslationResult(for: reply), .loading(toLang: target), target)
             XCTAssertNil(translated.translationResult(for: reply, accountPeerId: accountId), target)
-            XCTAssertNil(translated.pinnedTranslationResult(for: reply, accountPeerId: accountId), target)
+            XCTAssertTrue(translated.translationEligibility.isEmpty, target)
         }
     }
 
@@ -212,59 +212,61 @@ final class OutgoingChatTranslationTests: XCTestCase {
         XCTAssertNil(translated.replyTranslationResult(for: reply))
     }
 
-    func testPinnedTranslationRequiresPreparedEligibility() {
-        for incoming in [false, true] {
-            let pinned = message(russian, incoming: incoming)
-            let batch = ChatTranslationMessages([pinned], replies: [], accountPeerId: accountId, toLang: "en")
-            var translated = state(pinned)
-            XCTAssertEqual(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId), incoming ? .loading(toLang: "en") : nil)
-            translated.translationEligibility = batch.eligibility
-            if #available(macOS 10.14, *) {
-                XCTAssertEqual(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId), .loading(toLang: "en"))
-                translated.result[.init(id: pinned.id, toLang: "en")] = .complete(toLang: "en")
-                XCTAssertEqual(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId), .complete(toLang: "en"))
-            } else {
-                XCTAssertEqual(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId), incoming ? .loading(toLang: "en") : nil)
-            }
-            translated.translate = false
-            XCTAssertNil(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
-            translated.translate = true
-            translated.canTranslate = false
-            XCTAssertNil(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
-        }
+    func testEligibilityTracksContentInsteadOfMessageVersion() {
+        let first = message(russian)
+        let refreshed = message(russian, stableVersion: 1)
+        let before = ChatTranslationMessages([first], replies: [], accountPeerId: accountId, toLang: "en")
+        let after = ChatTranslationMessages([refreshed], replies: [], accountPeerId: accountId, toLang: "en")
+        XCTAssertEqual(before.eligibility, after.eligibility)
+        XCTAssertEqual(ChatTranslationSource(first), ChatTranslationSource(refreshed))
+        XCTAssertNotEqual(ChatTranslationSource(first), ChatTranslationSource(message(english, stableVersion: 1)))
     }
 
-    func testIncomingPinnedResultDoesNotRequireEligibilitySnapshot() {
-        for text in [english, ""] {
-            let pinned = message(text, incoming: true, attributes: [TranslationMessageAttribute(text: "Translated message", entities: [], toLang: "sr")])
-            var translated = state(pinned, to: "sr")
-            XCTAssertTrue(translated.translationEligibility.isEmpty)
-            XCTAssertEqual(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId), .loading(toLang: "sr"))
-            translated.result[.init(id: pinned.id, toLang: "sr")] = .complete(toLang: "sr")
-            XCTAssertEqual(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId), .complete(toLang: "sr"))
-        }
+    func testEditedSourceClearsStaleLoadingAndRetainsTargetGuard() {
+        let first = message(russian, incoming: true)
+        let edited = message("Теперь это совсем другое сообщение.", incoming: true, stableVersion: 1)
+        var translated = state(first)
+        translated.updateTranslation(ChatTranslationMessages([first], replies: [], accountPeerId: accountId, toLang: "en"), toLang: "en")
+        translated.updateTranslation(ChatTranslationMessages([edited], replies: [], accountPeerId: accountId, toLang: "en"), toLang: "en")
+        XCTAssertNil(translated.result[.init(id: first.id, toLang: "en")])
+        XCTAssertEqual(translated.translationEligibility[.init(id: first.id, toLang: "en")], ChatTranslationSource(edited))
+        let before = translated
+        translated.updateTranslation(ChatTranslationMessages([first], replies: [], accountPeerId: accountId, toLang: "ru"), toLang: "ru")
+        XCTAssertEqual(translated, before)
+    }
+
+    func testCompletedResultWithoutCachedAttributeIsCleared() {
+        let first = message(russian, incoming: true, attributes: [TranslationMessageAttribute(text: "Hello", entities: [], toLang: "en")])
+        var translated = state(first)
+        translated.updateTranslation(ChatTranslationMessages([first], replies: [], accountPeerId: accountId, toLang: "en"), toLang: "en")
+        XCTAssertEqual(translated.result[.init(id: first.id, toLang: "en")], .complete(toLang: "en"))
+        let edited = message("Изменённое сообщение.", incoming: true, stableVersion: 1)
+        translated.updateTranslation(ChatTranslationMessages([edited], replies: [], accountPeerId: accountId, toLang: "en"), toLang: "en")
+        XCTAssertNil(translated.result[.init(id: first.id, toLang: "en")])
     }
 
     func testReplyAndMessageBatchDeduplicatesRequests() {
         let incoming = message(russian, incoming: true)
         let batch = ChatTranslationMessages([incoming, incoming], replies: [incoming, incoming], accountPeerId: accountId, toLang: "sr")
         XCTAssertEqual(batch.messages.map { $0.id }, [incoming.id])
-        XCTAssertEqual(batch.eligibility[.init(id: incoming.id, toLang: "sr")], incoming.stableVersion)
+        XCTAssertEqual(batch.eligibility[.init(id: incoming.id, toLang: "sr")], ChatTranslationSource(incoming))
     }
 
-    func testPinnedTranslationRejectsStaleTargetAndMessageVersion() {
+    func testTargetLanguageEditRemovesOutgoingEligibility() {
         let pinned = message(russian)
         var translated = state(pinned)
-        translated.translationEligibility = ChatTranslationMessages([pinned], replies: [], accountPeerId: accountId, toLang: "en").eligibility
-        translated.to = "sr"
-        translated.result[.init(id: pinned.id, toLang: "sr")] = .complete(toLang: "sr")
-        XCTAssertNil(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
-        translated.to = "en"
+        translated.updateTranslation(ChatTranslationMessages([pinned], replies: [], accountPeerId: accountId, toLang: "en"), toLang: "en")
         let edited = message(english, stableVersion: 1)
-        XCTAssertNil(translated.pinnedTranslationResult(for: edited, accountPeerId: accountId))
-        translated.translationEligibility = ChatTranslationMessages([edited], replies: [], accountPeerId: accountId, toLang: "en").eligibility
-        XCTAssertNil(translated.pinnedTranslationResult(for: edited, accountPeerId: accountId))
-        XCTAssertNil(translated.pinnedTranslationResult(for: pinned, accountPeerId: accountId))
+        translated.updateTranslation(ChatTranslationMessages([edited], replies: [], accountPeerId: accountId, toLang: "en"), toLang: "en")
+        XCTAssertTrue(translated.translationEligibility.isEmpty)
+        XCTAssertNil(translated.translationResult(for: edited, accountPeerId: accountId))
+        if #available(macOS 10.14, *) {
+            XCTAssertNil(translated.result[.init(id: pinned.id, toLang: "en")])
+            let foreignAgain = message("Теперь сообщение снова на русском языке.", stableVersion: 2)
+            translated.updateTranslation(ChatTranslationMessages([foreignAgain], replies: [], accountPeerId: accountId, toLang: "en"), toLang: "en")
+            XCTAssertNotNil(translated.translationEligibility[.init(id: pinned.id, toLang: "en")])
+            XCTAssertNil(translated.result[.init(id: pinned.id, toLang: "en")])
+        }
     }
 
     func testOwnReplyPolicyWithoutLanguageRecognition() {

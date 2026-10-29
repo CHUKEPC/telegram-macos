@@ -257,17 +257,46 @@ public func canTranslateChatMessage(_ message: Message, accountPeerId: PeerId?, 
     return chatTranslationNeedsTranslation(texts, toLang: toLang)
 }
 
+public struct ChatTranslationSource: Equatable {
+    private let text: String
+    private let entities: [MessageTextEntity]
+    private let richText: [InstantPageBlock]?
+    private let pollTexts: [String]
+
+    public init(_ message: Message) {
+        self.text = message.text
+        self.entities = message.textEntitiesAttribute?.entities ?? []
+        let richText = message.attributes.compactMap { $0 as? RichTextMessageAttribute }.first
+        self.richText = richText.map { ($0.fullInstantPage ?? $0.instantPage).blocks }
+        if let poll = message.media.first as? TelegramMediaPoll {
+            self.pollTexts = [poll.text] + poll.options.map { $0.text } + (poll.results.solution.map { [$0.text] } ?? [])
+        } else {
+            self.pollTexts = []
+        }
+    }
+}
+
 struct ChatTranslationMessages {
     let messages: [Message]
-    let eligibility: [ChatLiveTranslateContext.State.Key: UInt32]
+    let sources: [ChatLiveTranslateContext.State.Key: ChatTranslationSource]
+    let eligibility: [ChatLiveTranslateContext.State.Key: ChatTranslationSource]
 
     init(_ messages: [Message], replies: [Message], accountPeerId: PeerId?, toLang: String) {
         let eligible = messages.filter { canTranslateChatMessage($0, accountPeerId: accountPeerId, toLang: toLang) }
         var ids = Set<MessageId>()
         self.messages = (eligible + replies).filter { ids.insert($0.id).inserted }.sorted(by: { $0.id < $1.id })
-        var eligibility: [ChatLiveTranslateContext.State.Key: UInt32] = [:]
+        var sources: [ChatLiveTranslateContext.State.Key: ChatTranslationSource] = [:]
+        for message in messages + replies {
+            let key = ChatLiveTranslateContext.State.Key(id: message.id, toLang: toLang)
+            if sources[key] == nil {
+                sources[key] = ChatTranslationSource(message)
+            }
+        }
+        self.sources = sources
+        var eligibility: [ChatLiveTranslateContext.State.Key: ChatTranslationSource] = [:]
         for message in eligible {
-            eligibility[.Key(id: message.id, toLang: toLang)] = message.stableVersion
+            let key = ChatLiveTranslateContext.State.Key(id: message.id, toLang: toLang)
+            eligibility[key] = sources[key]
         }
         self.eligibility = eligibility
     }
@@ -371,7 +400,7 @@ public final class ChatLiveTranslateContext {
         }
 
         public var result:[Key : Result]
-        public var translationEligibility: [Key: UInt32] = [:]
+        public var translationEligibility: [Key: ChatTranslationSource] = [:]
         public var transcriptionResult:[TranscriptionKey : TranscriptionResult]
         public var summarizeResult:[SummarizeKey : SummarizeResult]
 
@@ -396,17 +425,26 @@ public final class ChatLiveTranslateContext {
             return result[.Key(id: message.id, toLang: to)]
         }
 
-        public func pinnedTranslationResult(for message: Message, accountPeerId: PeerId) -> Result? {
-            guard canTranslate, translate else {
-                return nil
+        mutating func updateTranslation(_ batch: ChatTranslationMessages, toLang: String) {
+            guard canTranslate, translate, to == toLang else {
+                return
             }
-            let key = Key(id: message.id, toLang: to)
-            if message.author?.id == accountPeerId || !message.effectivelyIncoming(accountPeerId) {
-                guard translationEligibility[key] == message.stableVersion else {
-                    return nil
+            for (key, source) in batch.sources {
+                if let previous = translationEligibility[key], previous != source {
+                    result.removeValue(forKey: key)
+                    queued.removeAll(where: { $0.id == key.id })
                 }
             }
-            return result[key]
+            for message in batch.messages {
+                let key = Key(id: message.id, toLang: toLang)
+                if message.hasTranslationAttribute(toLang: toLang) {
+                    result[key] = .complete(toLang: toLang)
+                } else if result[key] == .complete(toLang: toLang) {
+                    result.removeValue(forKey: key)
+                    queued.removeAll(where: { $0.id == message.id })
+                }
+            }
+            translationEligibility = batch.eligibility
         }
 
         public func transcriptionTranslationResult(for message: Message, accountPeerId: PeerId?) -> TranscriptionResult? {
@@ -749,7 +787,7 @@ public final class ChatLiveTranslateContext {
         return statePromise.get()
     }
     
-    private var holder:[MessageId] = []
+    private var holder: [MessageId: ChatTranslationSource] = [:]
     
     public func translate(_ message: [Message], replies: [Message] = []) {
         prepareQueue.justDispatch { [weak self] in
@@ -763,28 +801,15 @@ public final class ChatLiveTranslateContext {
             }
             let batch = ChatTranslationMessages(message, replies: replies, accountPeerId: self.context.peerId, toLang: toLang)
             let msgs = batch.messages.filter { !$0.hasTranslationAttribute(toLang: toLang) }
-            let translated = batch.messages.filter { $0.hasTranslationAttribute(toLang: toLang) }
 
             self.updateState { current in
                 var current = current
-                if current.canTranslate, current.translate, current.to == toLang {
-                    current.translationEligibility = batch.eligibility
-                    if !translated.isEmpty {
-                        for msg in translated {
-                            current.result[.Key(id: msg.id, toLang: toLang)] = .complete(toLang: toLang)
-                        }
-                        for msg in msgs {
-                            if !translated.contains(msg), case .complete(toLang: toLang) = current.result[.Key(id: msg.id, toLang: toLang)] {
-                                current.result.removeValue(forKey: .Key(id: msg.id, toLang: toLang))
-                            }
-                        }
-                    }
-                }
+                current.updateTranslation(batch, toLang: toLang)
                 return current
             }
-            let ids = msgs.map ({ $0.id })
-            if self.holder != ids {
-                self.holder = ids
+            let sources = Dictionary(uniqueKeysWithValues: msgs.map { ($0.id, ChatTranslationSource($0)) })
+            if self.holder != sources {
+                self.holder = sources
                 let signal = Signal<Void, NoError>.complete() |> delay(0.01, queue: prepareQueue)
                 
                 self.holderDisposable.set(signal.start(completed: { [weak self] in

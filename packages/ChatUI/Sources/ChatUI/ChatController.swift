@@ -11601,6 +11601,10 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
             }
             
             
+            if value.pinnedMessageId != oldValue.pinnedMessageId {
+                genericView.tableView.notifyScrollHandlers()
+            }
+
             if value.monoforumState != oldValue.monoforumState || value.monoforumTopics != oldValue.monoforumTopics || value.chatLocation != oldValue.chatLocation {
                 genericView.updateMonoforumState(state: value.monoforumState, items: value.monoforumTopics, threadId: value.chatLocation.threadId, animated: animated)
             }
