@@ -1269,9 +1269,8 @@ public class ChatControllerView : View, ChatInputDelegate {
             } else if let pinnedMessageId = interfaceState.pinnedMessageId, !interfaceState.interfaceState.dismissedPinnedMessageId.contains(pinnedMessageId.messageId), !interfaceState.hidePinnedMessage, interfaceState.chatMode != .pinned {
                 
                 let translation: ChatLiveTranslateContext.State.Result?
-                if let translate = interfaceState.translateState, translate.canTranslate, translate.translate,
-                   let message = pinnedMessageId.message, canTranslateChatMessage(message, accountPeerId: chatInteraction.interactionContext.peerId, toLang: translate.to) {
-                    translation = translate.result[.Key(id: pinnedMessageId.messageId, toLang: translate.to)]
+                if let translate = interfaceState.translateState, let message = pinnedMessageId.message {
+                    translation = translate.pinnedTranslationResult(for: message, accountPeerId: chatInteraction.interactionContext.peerId)
                 } else {
                     translation = nil
                 }
@@ -1288,9 +1287,8 @@ public class ChatControllerView : View, ChatInputDelegate {
             if pinnedMessageId.message?.restrictedText(chatInteraction.interactionContext.contentSettings) == nil {
                 
                 let translation: ChatLiveTranslateContext.State.Result?
-                if let translate = interfaceState.translateState, translate.canTranslate, translate.translate,
-                   let message = pinnedMessageId.message, canTranslateChatMessage(message, accountPeerId: chatInteraction.interactionContext.peerId, toLang: translate.to) {
-                    translation = translate.result[.Key(id: pinnedMessageId.messageId, toLang: translate.to)]
+                if let translate = interfaceState.translateState, let message = pinnedMessageId.message {
+                    translation = translate.pinnedTranslationResult(for: message, accountPeerId: chatInteraction.interactionContext.peerId)
                 } else {
                     translation = nil
                 }
@@ -3951,7 +3949,7 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
             appearanceReady.set(true)
             if let state = translate {
                 self?.chatInteraction.update({ current in
-                    return current.withUpdatedTranslateState(.init(canTranslate: state.canTranslate, translate: state.translate, from: state.from, to: state.to, paywall: state.paywall, tone: state.tone, result: state.result))
+                    return current.withUpdatedTranslateState(.init(state))
                 })
                 self?.genericView.tableView.notifyScrollHandlers()
             }
@@ -8969,6 +8967,7 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
 
 
                 var messagesToTranslate: [Message] = []
+                var repliesToTranslate: [Message] = []
                 var messagesToTranslateTranscribe: [Message] = []
 
                 
@@ -9156,7 +9155,7 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
                                 }
                                 if let reply = message.replyAttribute, let replyMessage = message.associatedMessages[reply.messageId] {
                                     if !replyMessage.text.isEmpty {
-                                        messagesToTranslate.append(replyMessage)
+                                        repliesToTranslate.append(replyMessage)
                                     }
                                 }
                             }
@@ -9220,8 +9219,8 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
                     messagesToTranslate.append(message)
                 }
                 
-                if !messagesToTranslate.isEmpty {
-                    strongSelf.liveTranslate?.translate(messagesToTranslate.sorted(by: { $0.id < $1.id}))
+                if !messagesToTranslate.isEmpty || !repliesToTranslate.isEmpty {
+                    strongSelf.liveTranslate?.translate(messagesToTranslate, replies: repliesToTranslate)
                 }
                 if !messagesToTranslateTranscribe.isEmpty {
                     strongSelf.liveTranslate?.translateTranscription(messagesToTranslateTranscribe.sorted(by: { $0.id < $1.id}))

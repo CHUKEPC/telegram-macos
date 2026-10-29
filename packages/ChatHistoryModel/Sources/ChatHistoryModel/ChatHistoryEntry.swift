@@ -1228,7 +1228,7 @@ public func messageEntries(_ messagesEntries: [MessageHistoryEntry], location: C
         if let translate = translate {
             messageTranslate = translate.translationResult(for: message, accountPeerId: accountPeerId)
             if let reply = message.replyAttribute, let replyMessage = message.associatedMessages[reply.messageId] {
-                replyTranslate = translate.translationResult(for: replyMessage, accountPeerId: accountPeerId)
+                replyTranslate = translate.replyTranslationResult(for: replyMessage)
             }
         }
 

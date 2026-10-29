@@ -257,6 +257,22 @@ public func canTranslateChatMessage(_ message: Message, accountPeerId: PeerId?, 
     return chatTranslationNeedsTranslation(texts, toLang: toLang)
 }
 
+struct ChatTranslationMessages {
+    let messages: [Message]
+    let eligibility: [ChatLiveTranslateContext.State.Key: UInt32]
+
+    init(_ messages: [Message], replies: [Message], accountPeerId: PeerId?, toLang: String) {
+        let eligible = messages.filter { canTranslateChatMessage($0, accountPeerId: accountPeerId, toLang: toLang) }
+        var ids = Set<MessageId>()
+        self.messages = (eligible + replies).filter { ids.insert($0.id).inserted }.sorted(by: { $0.id < $1.id })
+        var eligibility: [ChatLiveTranslateContext.State.Key: UInt32] = [:]
+        for message in eligible {
+            eligibility[.Key(id: message.id, toLang: toLang)] = message.stableVersion
+        }
+        self.eligibility = eligibility
+    }
+}
+
 public final class ChatLiveTranslateContext {
 
     public struct State : Equatable {
@@ -355,6 +371,7 @@ public final class ChatLiveTranslateContext {
         }
 
         public var result:[Key : Result]
+        public var translationEligibility: [Key: UInt32] = [:]
         public var transcriptionResult:[TranscriptionKey : TranscriptionResult]
         public var summarizeResult:[SummarizeKey : SummarizeResult]
 
@@ -370,6 +387,26 @@ public final class ChatLiveTranslateContext {
                 return .complete(toLang: to)
             }
             return result[.Key(id: message.id, toLang: to)]
+        }
+
+        public func replyTranslationResult(for message: Message) -> Result? {
+            if canTranslate, translate, message.hasTranslationAttribute(toLang: to) {
+                return .complete(toLang: to)
+            }
+            return result[.Key(id: message.id, toLang: to)]
+        }
+
+        public func pinnedTranslationResult(for message: Message, accountPeerId: PeerId) -> Result? {
+            guard canTranslate, translate else {
+                return nil
+            }
+            let key = Key(id: message.id, toLang: to)
+            if message.author?.id == accountPeerId || !message.effectivelyIncoming(accountPeerId) {
+                guard translationEligibility[key] == message.stableVersion else {
+                    return nil
+                }
+            }
+            return result[key]
         }
 
         public func transcriptionTranslationResult(for message: Message, accountPeerId: PeerId?) -> TranscriptionResult? {
@@ -510,6 +547,7 @@ public final class ChatLiveTranslateContext {
                 current.paywall = isPremium ? false : (state?.paywall ?? false)
                 if !current.canTranslate || !current.translate || toUpdated {
                     current.result = [:]
+                    current.translationEligibility = [:]
                     current.queued = []
                     current.queuedTranscriptions = []
                     self?.holder.removeAll()
@@ -713,7 +751,7 @@ public final class ChatLiveTranslateContext {
     
     private var holder:[MessageId] = []
     
-    public func translate(_ message: [Message]) {
+    public func translate(_ message: [Message], replies: [Message] = []) {
         prepareQueue.justDispatch { [weak self] in
             guard let `self` = self else {
                 return
@@ -723,14 +761,15 @@ public final class ChatLiveTranslateContext {
             if !isEnabled {
                 return
             }
-            let eligible = message.filter { canTranslateChatMessage($0, accountPeerId: self.context.peerId, toLang: toLang) }
-            let msgs = eligible.filter { !$0.hasTranslationAttribute(toLang: toLang) }
-            let translated = eligible.filter { $0.hasTranslationAttribute(toLang: toLang) }
-            
-            if !translated.isEmpty {
-                self.updateState { current in
-                    var current = current
-                    if current.translate {
+            let batch = ChatTranslationMessages(message, replies: replies, accountPeerId: self.context.peerId, toLang: toLang)
+            let msgs = batch.messages.filter { !$0.hasTranslationAttribute(toLang: toLang) }
+            let translated = batch.messages.filter { $0.hasTranslationAttribute(toLang: toLang) }
+
+            self.updateState { current in
+                var current = current
+                if current.canTranslate, current.translate, current.to == toLang {
+                    current.translationEligibility = batch.eligibility
+                    if !translated.isEmpty {
                         for msg in translated {
                             current.result[.Key(id: msg.id, toLang: toLang)] = .complete(toLang: toLang)
                         }
@@ -740,9 +779,8 @@ public final class ChatLiveTranslateContext {
                             }
                         }
                     }
-                    return current
                 }
-                
+                return current
             }
             let ids = msgs.map ({ $0.id })
             if self.holder != ids {
@@ -758,7 +796,7 @@ public final class ChatLiveTranslateContext {
                         var current = current
                         if current.canTranslate, current.translate, current.to == toLang {
                             for msg in msgs {
-                                if canTranslateChatMessage(msg, accountPeerId: self.context.peerId, toLang: current.to), current.result[.Key(id: msg.id, toLang: current.to)] == nil {
+                                if current.result[.Key(id: msg.id, toLang: current.to)] == nil {
                                     current.queued.append(msg)
                                 }
                             }
