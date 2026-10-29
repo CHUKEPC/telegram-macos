@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-import TGUIKit
+@testable import TGUIKit
 import TelegramCore
 import Postbox
 import TelegramTheme
@@ -14,6 +14,32 @@ final class ChatMusicFetchPresentationTests: XCTestCase {
         super.setUp()
         UITestBootstrap.install()
         ChatMediaUIHooks.install(.placeholder)
+    }
+
+    func testAlreadyDownloadingTrackAppearsWithoutPlaceholderTransition() throws {
+        let view = ChatMusicContentView(frame: NSMakeRect(0, 0, 200, 40))
+        for id: UInt32 in [1, 2, 3] {
+            view.parent = message(id)
+            view.initializeFetchStatus()
+            XCTAssertNil(view.fetchStatus)
+            XCTAssertFalse(view.hasFetchStatusForCurrentMedia)
+            let manager = FetchManagerProbe()
+            view.updateFetchStatus(chatMusicFetchStatus(fetchManager: manager, message: view.parent, file: musicFile()))
+            manager.emit(.Fetching(isActive: true, progress: 0.6), hasEntry: true)
+            XCTAssertFalse(view.statusChangeIsAnimatable)
+            XCTAssertFalse(view.progressView.isHidden)
+            guard case let .Fetching(progress, _) = view.progressView.state else { return XCTFail("Expected download") }
+            XCTAssertEqual(progress, 0.6)
+            XCTAssertEqual(view.progressView.displayedValuesForTesting.ring, 1)
+            XCTAssertNil(view.progressView.displayedValuesForTesting.swap)
+            view.initializeFetchStatus()
+            XCTAssertEqual(view.fetchStatus, .Fetching(isActive: true, progress: 0.6))
+            manager.emit(.Local)
+            XCTAssertTrue(view.statusChangeIsAnimatable)
+        }
+        let audio = ChatAudioContentView(frame: .zero)
+        audio.initializeFetchStatus()
+        XCTAssertEqual(audio.fetchStatus, .Local)
     }
 
     func testCoverVisibilityFollowsDownloadAndCancellation() throws {

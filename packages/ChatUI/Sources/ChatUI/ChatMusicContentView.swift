@@ -140,6 +140,12 @@ public class ChatMusicContentView: ChatAudioContentView {
       //  imageView.layer?.cornerRadius = 20
     }
     
+    override func initializeFetchStatus() {
+        if !hasFetchStatusForCurrentMedia {
+            fetchStatus = nil
+        }
+    }
+
     func updateFetchStatus(_ status: Signal<MediaResourceStatus, NoError>) {
         self.statusDisposable.set((status |> deliverOnMainQueue).start(next: { [weak self] status in
             self?.fetchStatus = status
