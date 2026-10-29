@@ -43,7 +43,12 @@ def main():
     share = read("packages/ShareUI/Sources/ShareUI/ShareModalController.swift")
     sender = read("packages/ChatHistoryModel/Sources/ChatHistoryModel/SenderController.swift")
     delivery = read("packages/ShareUI/Sources/ShareUI/ShareDeliveryResult.swift")
+    controller = read("packages/ChatUI/Sources/ChatUI/ChatController.swift")
+    navigation = read("packages/TGUIKit/Sources/MajorNavigationController.swift")
+    assert "self.controller.ableToNextController(controller," in navigation
     replacements = {
+        "__RECORDING_CONFIRM__": declaration(controller, "public func confirmDiscardRecordingIfNeeded("),
+        "__NAVIGATION_GATE__": declaration(controller, "self.ableToNextController = {"),
         "__PERFORM_FORWARD__": declaration(share, "private func performForward("),
         "__FORWARD_RESULT__": declaration(share, "public enum ForwardMessagesResult"),
         "__SENDER_FORWARD__": declaration(sender, "public static func forwardMessages("),
@@ -74,6 +79,9 @@ let package = Package(name: "SavedForwardOptions", platforms: [.macOS(.v10_13)],
             cases = ET.parse(report).getroot().findall(".//testcase")
             failures = [case.attrib.get("name") for case in cases if case.find("failure") is not None or case.find("error") is not None]
         else:
+            cases = []
+            failures = []
+        if not cases:
             cases = re.findall(r"^Test Case '(.+)' (passed|failed) ", result.stdout, flags=re.M)
             failures = [name for name, status in cases if status == "failed"]
         print(f"Regression summary: {len(cases)} tests, {len(failures)} failing tests", flush=True)

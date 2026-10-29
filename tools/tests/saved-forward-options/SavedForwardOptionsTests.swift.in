@@ -200,7 +200,11 @@ enum ChatState {
 
 struct PresentationState: Equatable {
     var hasSelection = true
-    var isRecording = false
+    var recordingState: RecordingState?
+    var isRecording: Bool {
+        get { recordingState != nil }
+        set { recordingState = newValue ? RecordingState() : nil }
+    }
     var hasSearchTag = false
     var interfaceState = InterfaceState()
     var state: ChatState {
@@ -236,8 +240,22 @@ final class ChatInteraction {
     }
 }
 
-class Controller {}
+final class RecordingState: Equatable {
+    var discarded = false
+    static func == (lhs: RecordingState, rhs: RecordingState) -> Bool { lhs === rhs }
+    func discard(from interaction: ChatInteraction, closingOtherModals: Bool) {
+        discarded = true
+        interaction.presentation.recordingState = nil
+    }
+}
+
+class Controller {
+    var ableToNextController: (Controller, @escaping (Controller, Bool) -> Void) -> Void = { controller, completed in completed(controller, true) }
+}
 class ChatInterfaceController: Controller {
+    let context = Context()
+    private var isConfirmingDiscardRecording = false
+    __RECORDING_CONFIRM__
     let chatInteraction: ChatInteraction
     let ready = Promise<Bool>()
     let initialAction: ChatInitialAction?
@@ -245,6 +263,8 @@ class ChatInterfaceController: Controller {
         chatInteraction = ChatInteraction(location)
         self.initialAction = initialAction
         ready.set(readySignal)
+        super.init()
+        __NAVIGATION_GATE__
     }
 }
 
@@ -258,9 +278,12 @@ final class Navigation {
         }
     }
     func push(_ controller: ChatInterfaceController) {
-        stack.append(controller)
-        pushed.append(controller)
-        self.controller = controller
+        self.controller.ableToNextController(controller, { [weak self] controller, accepted in
+            guard accepted, let self, let controller = controller as? ChatInterfaceController else { return }
+            self.stack.append(controller)
+            self.pushed.append(controller)
+            self.controller = controller
+        })
     }
 }
 
@@ -328,7 +351,25 @@ enum ForumUI {
     }
 }
 
-struct Strings { let pollForwardError = "poll-forward-error" }
+final class ConfirmationProbe {
+    static var count = 0
+    static var accept: (() -> Void)?
+    static var cancel: (() -> Void)?
+    static var notices: [String] = []
+    static func reset() { count = 0; accept = nil; cancel = nil; notices = [] }
+}
+func verifyAlert_button(for window: Int, information: String, ok: String, cancel: String, successHandler: @escaping (Bool) -> Void, cancelHandler: @escaping () -> Void, onDeinit: @escaping () -> Void) {
+    ConfirmationProbe.count += 1
+    ConfirmationProbe.accept = { successHandler(true); onDeinit() }
+    ConfirmationProbe.cancel = { cancelHandler(); onDeinit() }
+}
+func showModalText(for window: Int, text: String) { ConfirmationProbe.notices.append(text) }
+struct Strings {
+    let pollForwardError = "poll-forward-error"
+    let chatRecordingCancel = "discard recording?"
+    let alertDiscard = "Discard"
+    let alertNO = "No"
+}
 func strings() -> Strings { Strings() }
 struct Theme {
     struct Icons { let successModalProgress = 0 }
@@ -374,6 +415,7 @@ final class SavedForwardOptionsTests: XCTestCase {
     var comment: ChatTextInputState { ChatTextInputState(inputText: "keep this comment #tag") }
 
     override func setUp() {
+        ConfirmationProbe.reset()
         context = Context()
         for id in [context.peerId, other, third] { context.account.postbox.peers[id] = Peer(id: id) }
         for message in [saved, external] { context.account.postbox.messages[message.id] = message }
@@ -506,8 +548,91 @@ final class SavedForwardOptionsTests: XCTestCase {
         try assertSavedSpecialControllerOpensHistoryDraft(mode: .history, editState: edit, suppliedComment: comment)
     }
 
-    func testSavedWhileRecordingSelfOpensMainComposerWithoutReplacingRecording() throws {
-        try assertSavedSpecialControllerOpensHistoryDraft(mode: .history, recording: true, suppliedComment: comment)
+    func assertRecordingBlocksSavedDraft(location: ChatLocation, thread: Int64? = nil, messages: [Message]? = nil, file: StaticString = #filePath, line: UInt = #line) {
+        let current = install(location)
+        let recording = RecordingState()
+        current.chatInteraction.presentation.recordingState = recording
+        current.chatInteraction.presentation.interfaceState.inputState = comment
+        current.chatInteraction.presentation.interfaceState.forwardMessageIds = [external.id]
+        let before = current.chatInteraction.presentation
+        assertResults(forward(messages ?? [saved], thread: thread, comment: comment), [.restricted], file: file, line: line)
+        XCTAssertEqual(current.chatInteraction.presentation, before, file: file, line: line)
+        XCTAssertTrue(current.chatInteraction.presentation.recordingState === recording, file: file, line: line)
+        XCTAssertFalse(recording.discarded, file: file, line: line)
+        XCTAssertTrue(context.bindings.navigation.controller === current, file: file, line: line)
+        XCTAssertEqual(context.bindings.navigation.stack.count, 1, file: file, line: line)
+        XCTAssertEqual(ConfirmationProbe.count, 0, file: file, line: line)
+        XCTAssertNil(ConfirmationProbe.accept, file: file, line: line)
+        XCTAssertEqual(ConfirmationProbe.notices, ["Finish or discard the current recording before forwarding to Saved Messages."], file: file, line: line)
+        assertNoEnqueue(file: file, line: line)
+        assertNoNavigation(file: file, line: line)
+    }
+
+    func testSavedWhileRecordingSelfDoesNotNavigateOrAskToDiscard() {
+        assertRecordingBlocksSavedDraft(location: .peer(context.peerId))
+    }
+
+    func testSavedWhileRecordingInOtherChatDoesNotNavigateOrAskToDiscard() {
+        assertRecordingBlocksSavedDraft(location: .peer(other))
+    }
+
+    func testSavedThreadWhileRecordingDoesNotNavigateOrAskToDiscard() {
+        assertRecordingBlocksSavedDraft(location: .peer(context.peerId), thread: 71)
+    }
+
+    func testMixedSavedSourcesWhileRecordingDoNotNavigateOrAskToDiscard() {
+        assertRecordingBlocksSavedDraft(location: .peer(context.peerId), messages: [external, saved])
+    }
+
+    func testSavedForwardCanBeRetriedAfterRecordingFinishes() {
+        let current = install(.peer(context.peerId))
+        current.chatInteraction.presentation.isRecording = true
+        assertResults(forward([saved]), [.restricted])
+        current.chatInteraction.presentation.isRecording = false
+        assertResults(forward([saved], comment: comment), [.draftPrepared])
+        assertDraft(current, ids: [saved.id], text: comment)
+        assertNoNavigation()
+        XCTAssertEqual(ConfirmationProbe.count, 0)
+    }
+
+    func testExternalQuickSaveDoesNotInterruptRecording() {
+        let current = install(.peer(context.peerId))
+        let recording = RecordingState()
+        current.chatInteraction.presentation.recordingState = recording
+        assertResults(forward([external]), [.accepted])
+        XCTAssertTrue(current.chatInteraction.presentation.recordingState === recording)
+        XCTAssertFalse(recording.discarded)
+        XCTAssertEqual(context.account.enqueueSubscriptions, 1)
+        XCTAssertEqual(ConfirmationProbe.count, 0)
+        XCTAssertTrue(ConfirmationProbe.notices.isEmpty)
+        assertNoNavigation()
+    }
+
+    func testNavigationGateDeclineKeepsRecordingAndCurrentController() {
+        let current = install(.peer(context.peerId))
+        let recording = RecordingState()
+        current.chatInteraction.presentation.recordingState = recording
+        context.bindings.navigation.push(ChatInterfaceController(.peer(other)))
+        XCTAssertEqual(ConfirmationProbe.count, 1)
+        ConfirmationProbe.cancel?()
+        XCTAssertTrue(context.bindings.navigation.controller === current)
+        XCTAssertTrue(context.bindings.navigation.pushed.isEmpty)
+        XCTAssertFalse(recording.discarded)
+        XCTAssertTrue(current.chatInteraction.presentation.recordingState === recording)
+    }
+
+    func testNavigationGateConfirmDiscardsRecordingBeforePushing() {
+        let current = install(.peer(context.peerId))
+        let recording = RecordingState()
+        current.chatInteraction.presentation.recordingState = recording
+        let next = ChatInterfaceController(.peer(other))
+        context.bindings.navigation.push(next)
+        XCTAssertEqual(ConfirmationProbe.count, 1)
+        XCTAssertTrue(context.bindings.navigation.pushed.isEmpty)
+        ConfirmationProbe.accept?()
+        XCTAssertTrue(context.bindings.navigation.controller === next)
+        XCTAssertTrue(recording.discarded)
+        XCTAssertNil(current.chatInteraction.presentation.recordingState)
     }
 
     func testSavedFromTagFilteredSelfOpensMainComposerWithoutReplacingFilter() throws {

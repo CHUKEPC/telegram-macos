@@ -1309,6 +1309,12 @@ public final class ForwardMessagesObject : ShareObject {
                             |> ignoreValues
                             |> castError(String.self)
                         } else if let peer = peer, !peer.isCommunity {
+                            if peerId == context.peerId, let controller = navigation.controller as? ChatInterfaceController, controller.chatInteraction.presentation.recordingState != nil {
+                                //TODOLANG
+                                showModalText(for: context.window, text: "Finish or discard the current recording before forwarding to Saved Messages.")
+                                observedResult?(.restricted)
+                                return .complete()
+                            }
 
                             let comment = peer.canSendMessage() ? comment : nil
                             let threadId = peerId == context.peerId ? nil : threadId
