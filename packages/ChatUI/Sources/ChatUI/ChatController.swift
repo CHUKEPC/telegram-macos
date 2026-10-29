@@ -3912,13 +3912,8 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
                         let countViewKey: PostboxViewKey = .historyTagSummaryView(tag: MessageTags(), peerId: peerId, threadId: savedMessagesPeerId.toInt64(), namespace: Namespaces.Message.Cloud, customTag: nil)
                         answersCount = context.account.postbox.combinedView(keys: [basicPeerKey, countViewKey])
                         |> map { views -> Int32? in
-                            
-                            var messageCount = 0
-                            if let summaryView = views.views[countViewKey] as? MessageHistoryTagSummaryView, let count = summaryView.count {
-                                messageCount += Int(count)
-                            }
-                            
-                            return Int32(messageCount)
+                            let count = (views.views[countViewKey] as? MessageHistoryTagSummaryView)?.count
+                            return mode.isSavedMessagesThread ? count : count ?? 0
                         }
 
                     } else if isThread {
@@ -11367,6 +11362,9 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
             return takeTableItem?(msgId)
         })
         super.init(context)
+        if mode.isSavedMessagesThread {
+            SavedChatControllerRegistry.shared.add(self)
+        }
 
         self.bar = .init(height: 0)
         self.insets = NSEdgeInsets()
@@ -11802,7 +11800,7 @@ open class ChatController<Context: AccountContextProtocol>: TelegramGenericViewC
             }
             
             if let peer = value.mainPeer, let oldPeer = oldValue.mainPeer {
-                if TelegramUtilsHooks.shared.peerIsForum(peer) && !TelegramUtilsHooks.shared.peerIsForum(oldPeer) || (oldValue.threadInfo != nil && value.threadInfo == nil && !peer.displayForumAsTabs(splitState: context.layout)), !peer.isMonoForum {
+                if TelegramUtilsHooks.shared.peerIsForum(peer) && !TelegramUtilsHooks.shared.peerIsForum(oldPeer) || (!self.mode.isSavedMessagesThread && oldValue.threadInfo != nil && value.threadInfo == nil && !peer.displayForumAsTabs(splitState: context.layout)), !peer.isMonoForum {
                     if (self.navigationController?.stackCount ?? 0) > 1 {
                         self.navigationController?.removeImmediately(self)
                     } else if self.mode == .preview {
