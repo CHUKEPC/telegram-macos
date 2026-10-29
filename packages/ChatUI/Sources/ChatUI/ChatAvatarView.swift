@@ -9,6 +9,7 @@ import AvatarUI
 import TelegramContext
 import TelegramTheme
 import TelegramUtils
+import ChatModeTypes
 
 public final class ChatAvatarView : Control {
     private let avatar: AvatarStoryControl = AvatarStoryControl(font: .avatar(.title), size: NSMakeSize(36, 36))
@@ -28,22 +29,64 @@ public final class ChatAvatarView : Control {
         self.scaleOnClick = true
     }
     private var peer: Peer?
-    private var menuBinding = UUID()
 
-    func updateContextMenu(_ factory: (() -> ContextMenu?)?) {
-        let binding = UUID()
-        menuBinding = binding
+    struct MenuContext: Equatable {
+        let account: ObjectIdentifier
+        let interaction: ObjectIdentifier
+        let chatPeerId: PeerId
+        let threadId: Int64?
+        let mode: ChatMode
+        let rowId: AnyHashable
+        let messageId: MessageId?
+        let peer: Peer
+        let chatPeer: Peer?
+        let hasStories: Bool
+
+        static func == (lhs: MenuContext, rhs: MenuContext) -> Bool {
+            guard lhs.account == rhs.account, lhs.interaction == rhs.interaction,
+                  lhs.chatPeerId == rhs.chatPeerId, lhs.threadId == rhs.threadId, lhs.mode == rhs.mode,
+                  lhs.rowId == rhs.rowId, lhs.messageId == rhs.messageId,
+                  lhs.peer.isEqual(rhs.peer), lhs.hasStories == rhs.hasStories else {
+                return false
+            }
+            switch (lhs.chatPeer, rhs.chatPeer) {
+            case let (lhs?, rhs?):
+                return lhs.isEqual(rhs)
+            case (nil, nil):
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    private static func menuContext(_ item: ChatRowItem, peer: Peer) -> MenuContext {
+        let interaction = item.chatInteraction
+        return MenuContext(account: ObjectIdentifier(interaction.interactionContext.account), interaction: ObjectIdentifier(interaction), chatPeerId: interaction.peerId, threadId: interaction.chatLocation.threadId, mode: interaction.mode, rowId: item.stableId, messageId: item.message?.id, peer: peer, chatPeer: interaction.peer, hasStories: item.entry.additionalData.authorStoryStats != nil)
+    }
+
+    private var menuBinding = UUID()
+    private var menuContext: MenuContext?
+    private var isMenuContextCurrent: () -> Bool = { false }
+
+    func updateContextMenu(_ factory: (() -> ContextMenu?)?, context: MenuContext? = nil, isCurrent: @escaping () -> Bool = { true }) {
+        if factory == nil || context == nil || menuContext != context {
+            menuBinding = UUID()
+        }
+        menuContext = context
+        isMenuContextCurrent = isCurrent
+        let binding = menuBinding
         guard let factory else {
             contextMenu = nil
             return
         }
         contextMenu = { [weak self] in
-            guard let self, self.menuBinding == binding, let menu = factory() else { return nil }
+            guard let self, self.menuBinding == binding, self.isMenuContextCurrent(), let menu = factory() else { return nil }
             func guardActions(_ menu: NSMenu) {
                 for case let item as ContextMenuItem in menu.items {
                     if let action = item.handler {
                         item.handler = { [weak self] in
-                            guard self?.menuBinding == binding else { return }
+                            guard let self, self.menuBinding == binding, self.isMenuContextCurrent() else { return }
                             action()
                         }
                     }
@@ -70,9 +113,13 @@ public final class ChatAvatarView : Control {
         }
         self.peer = peer
         if peer.id.id._internalGetInt64Value() != 0 {
+            let menuContext = Self.menuContext(item, peer: peer)
             self.updateContextMenu(ChatRowView.photoContextMenu(item, peer: peer, setOpenProgress: { [weak self] signal in
                 self?.setOpenProgress(signal)
-            }))
+            }), context: menuContext, isCurrent: { [weak item] in
+                guard let item else { return false }
+                return Self.menuContext(item, peer: peer) == menuContext
+            })
         } else {
             self.updateContextMenu(nil)
         }
