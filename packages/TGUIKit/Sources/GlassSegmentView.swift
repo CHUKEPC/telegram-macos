@@ -50,8 +50,9 @@ public final class GlassSegmentView: View {
         }
         self.selectedIndex = index
         self.selectionPosition = index.flatMap { CGFloat($0) }
-        let animated = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if !animated {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let animated = animated && !reduceMotion
+        if reduceMotion {
             selectionView.layer?.removeAllAnimations()
         }
         updateLayout(size: frame.size, transition: animated ? .animated(duration: 0.4, curve: .spring) : .immediate)

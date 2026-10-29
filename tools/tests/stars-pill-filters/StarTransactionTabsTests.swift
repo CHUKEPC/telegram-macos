@@ -233,6 +233,25 @@ final class StarTransactionTabsTests: XCTestCase {
         }
     }
 
+    func testAppearanceRefreshPreservesAnInFlightSelectionSpring() throws {
+        try withReduceMotion(false) {
+            let segments = GlassSegmentView(frame: NSMakeRect(0, 0, 360, 40))
+            let titles = ["Emoji", "Stickers", "GIFs"]
+            segments.set(titles: titles, selected: 0, animated: false)
+            segments.set(titles: titles, selected: 2, animated: true)
+            let selection = try XCTUnwrap(segments.subviews.first { !($0.layer?.animationKeys()?.isEmpty ?? true) })
+            let keys = try XCTUnwrap(selection.layer?.animationKeys())
+            XCTAssertFalse(keys.isEmpty)
+            segments.updateLocalizationAndTheme(theme: theme)
+            segments.set(titles: titles, selected: 2, animated: false)
+            XCTAssertEqual(selection.layer?.animationKeys(), keys)
+            try withReduceMotion(true) {
+                segments.set(titles: titles, selected: 2, animated: false)
+                XCTAssertTrue(selection.layer?.animationKeys()?.isEmpty ?? true)
+            }
+        }
+    }
+
     func testReduceMotionStopsScrollAndSelectionAnimations() throws {
         let titles = [String(repeating: "Long localized heading ", count: 4), "Incoming", "Outgoing"]
         let view = row(item(titles, selected: 0), width: 300)
