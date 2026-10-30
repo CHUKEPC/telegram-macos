@@ -24,11 +24,10 @@ legacy.removeValue(forKey: "cnt")
 let old = try decoder.decode(BaseApplicationSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
 check(old.showContactsTab, "Legacy missing cnt stays on")
 legacy["cnt"] = 0
-legacy["wlt"] = 1
-let previousExperiment = try decoder.decode(BaseApplicationSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
-check(!previousExperiment.showContactsTab, "Existing Contacts preference retained")
-let encoded = try JSONSerialization.jsonObject(with: encoder.encode(previousExperiment)) as! [String: Any]
-check(encoded["wlt"] == nil, "Obsolete Wallet preference is not emitted")
+let hiddenContacts = try decoder.decode(BaseApplicationSettings.self, from: JSONSerialization.data(withJSONObject: legacy))
+check(!hiddenContacts.showContactsTab, "Stored Contacts preference retained")
+let encoded = try JSONSerialization.jsonObject(with: encoder.encode(hiddenContacts)) as! [String: Any]
+check(encoded["cnt"] as? Int == 0, "Hidden Contacts preference is encoded")
 for visible in [false, true] {
     let value = defaults.withUpdatedShowContactsTab(visible)
     let loaded = try decoder.decode(BaseApplicationSettings.self, from: encoder.encode(value))
