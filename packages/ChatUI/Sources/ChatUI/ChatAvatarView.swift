@@ -30,6 +30,31 @@ public final class ChatAvatarView : Control {
     }
     private var peer: Peer?
 
+    struct ChatPeerMenuContext: Equatable {
+        let id: PeerId
+        let isGroup: Bool
+        let isChannel: Bool
+        let isMonoforum: Bool
+        let participationStatus: TelegramChannelParticipationStatus?
+        let isCreator: Bool
+        let canBanMembers: Bool
+        let canAddAdmins: Bool
+        let canManageRanks: Bool
+
+        init(_ peer: Peer) {
+            let channel = peer as? TelegramChannel
+            self.id = peer.id
+            self.isGroup = peer.isGroup || peer.isSupergroup
+            self.isChannel = peer.isChannel
+            self.isMonoforum = peer.isMonoForum
+            self.participationStatus = channel?.participationStatus
+            self.isCreator = channel?.flags.contains(.isCreator) == true
+            self.canBanMembers = channel?.hasPermission(.banMembers) == true
+            self.canAddAdmins = channel?.hasPermission(.addAdmins) == true
+            self.canManageRanks = channel?.hasPermission(.manageRanks) == true
+        }
+    }
+
     struct MenuContext: Equatable {
         let account: ObjectIdentifier
         let interaction: ObjectIdentifier
@@ -39,30 +64,20 @@ public final class ChatAvatarView : Control {
         let rowId: AnyHashable
         let messageId: MessageId?
         let peer: Peer
-        let chatPeer: Peer?
+        let chatPeer: ChatPeerMenuContext?
         let hasStories: Bool
 
         static func == (lhs: MenuContext, rhs: MenuContext) -> Bool {
-            guard lhs.account == rhs.account, lhs.interaction == rhs.interaction,
-                  lhs.chatPeerId == rhs.chatPeerId, lhs.threadId == rhs.threadId, lhs.mode == rhs.mode,
-                  lhs.rowId == rhs.rowId, lhs.messageId == rhs.messageId,
-                  lhs.peer.isEqual(rhs.peer), lhs.hasStories == rhs.hasStories else {
-                return false
-            }
-            switch (lhs.chatPeer, rhs.chatPeer) {
-            case let (lhs?, rhs?):
-                return lhs.isEqual(rhs)
-            case (nil, nil):
-                return true
-            default:
-                return false
-            }
+            return lhs.account == rhs.account && lhs.interaction == rhs.interaction
+                && lhs.chatPeerId == rhs.chatPeerId && lhs.threadId == rhs.threadId && lhs.mode == rhs.mode
+                && lhs.rowId == rhs.rowId && lhs.messageId == rhs.messageId
+                && lhs.peer.isEqual(rhs.peer) && lhs.chatPeer == rhs.chatPeer && lhs.hasStories == rhs.hasStories
         }
     }
 
     private static func menuContext(_ item: ChatRowItem, peer: Peer) -> MenuContext {
         let interaction = item.chatInteraction
-        return MenuContext(account: ObjectIdentifier(interaction.interactionContext.account), interaction: ObjectIdentifier(interaction), chatPeerId: interaction.peerId, threadId: interaction.chatLocation.threadId, mode: interaction.mode, rowId: item.stableId, messageId: item.message?.id, peer: peer, chatPeer: interaction.peer, hasStories: item.entry.additionalData.authorStoryStats != nil)
+        return MenuContext(account: ObjectIdentifier(interaction.interactionContext.account), interaction: ObjectIdentifier(interaction), chatPeerId: interaction.peerId, threadId: interaction.chatLocation.threadId, mode: interaction.mode, rowId: item.stableId, messageId: item.message?.id, peer: peer, chatPeer: interaction.peer.map(ChatPeerMenuContext.init), hasStories: item.entry.additionalData.authorStoryStats != nil)
     }
 
     private var menuBinding = UUID()

@@ -1,9 +1,9 @@
 # Avatar menu binding
 
-Run `python3 -I tools/tests/avatar-menu-binding/run.py` on macOS.
+Run `python3 -I tools/tests/avatar-menu-binding/run.py` on macOS with Xcode and the repository's native dependencies built. Additional arguments are forwarded to `xcodebuild`, for example `-derivedDataPath /path/to/build`.
 
-The harness compiles the production `MenuContext` equality and `updateContextMenu` method with the repository's `ChatAvatarMenuBindingTests`. AppKit `NSMenu`/`NSMenuItem` are real; peer models, the avatar view and TGUIKit's closure-carrying item wrapper are adapters. The two model factory helpers are replaced for this harness. It does not compile the full ChatUI module or exercise live row layout.
+The runner invokes `packages/ChatUI/Tests/run-tests.sh`, filtered to `ChatAvatarMenuBindingTests`. It compiles the actual ChatUI module and unchanged test source against real TelegramCore, Postbox and TGUIKit dependencies. There are no replacement peer factories or model adapters; missing dependencies fail the run rather than falling back to synthetic types.
 
-Coverage includes same-context refresh, all five primary actions and nested actions, author/row/message/account/interaction/rights/mode/thread/story-context changes, live permission revalidation, latest-row liveness checks and removal. Source checks cover `setPeer` wiring and ensure message versions are not used as binding identity.
+Coverage includes title/photo/boost/member-count refreshes without rebinding, same-context rebinding, story and premium-video author contexts, unrelated admin-rights and slow-mode changes, effective ban/promote/tag permissions, creator status, participation, chat kind, monoforum status, missing chat data, author/row/message/account/interaction/mode/thread/story changes, nested actions, latest-row liveness and removal. These are menu-binding tests; they do not exercise live row layout, video playback or network moderation.
 
-`--negative-control` restores unconditional UUID rotation in the extracted method; the same-context and latest-row-refresh cases must fail. Full module tests remain in `packages/ChatUI/Tests/ChatUITests/ChatAvatarMenuBindingTests.swift`.
+The previous adapter-based runner and its `--negative-control` option have been removed because replacing test constructors hid dependency API compilation errors.
