@@ -524,7 +524,7 @@ private func entries(_ state: State, arguments: Arguments) -> [InputDataEntry] {
     var seglist = seg.map { (key,_) -> EmojiSegment in
         return key
     }.sorted(by: <)
-    if !seglist.contains(.Recent), !state.recent.animated.isEmpty, arguments.mode == .emoji || arguments.mode == .stories {
+    if !seglist.contains(.Recent) {
         seglist.insert(.Recent, at: 0)
     }
     

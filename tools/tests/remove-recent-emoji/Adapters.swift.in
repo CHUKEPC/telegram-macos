@@ -10,10 +10,11 @@ enum EmojiSegment: Int, Comparable {
     var localizedString: String { self == .Recent ? "Frequently Used Emoji" : "People" }
     static func <(lhs: EmojiSegment, rhs: EmojiSegment) -> Bool { lhs.rawValue < rhs.rawValue }
 }
-enum PickerMode: CaseIterable {
-    case emoji, stories, forumTopic, selectAvatar, channelReactions, status
-    var itemMode: PickerMode { self }
-}
+__PICKER_MODE__
+
+__ROW_SELECTION__
+
+__REACTION_VALUE__
 struct SegmentState { let recent: RecentUsedEmoji }
 struct SegmentArguments { let mode: PickerMode }
 func recentSegmentList(_ seg: [EmojiSegment: [[NSAttributedString]]], state: SegmentState, arguments: SegmentArguments) -> [EmojiSegment] {
@@ -106,7 +107,13 @@ final class EmojiToleranceContextMenuItem: ContextMenuItem {
         super.init("skin-tone")
     }
 }
-struct TestStrings { let searchRemoveFromRecent = "Remove from Recent" }
+struct TestStrings {
+    let searchRemoveFromRecent = "Remove from Recent"
+    let reactionsRecentlyUsed = "Recently Used"
+    let reactionsPopular = "Popular Reactions"
+    let customStatusExpiresPromo = "Set an emoji status"
+    func customStatusExpires(_ value: String) -> String { "Expires in \(value)" }
+}
 func strings() -> TestStrings { TestStrings() }
 enum MenuAnimation {
     case menu_delete
@@ -161,16 +168,54 @@ final class BuiltinMenu {
     __BUILTIN_MENU__
 }
 
-struct TelegramMediaFile: Equatable { let fileId: MediaId }
-struct StickerPackItem: Equatable { let file: TelegramMediaFile }
+struct TelegramMediaFile: Equatable {
+    let fileId: MediaId
+    var isPremiumEmoji = false
+    var emojiReference: Int? = nil
+    var resource: LocalBundleResource? = nil
+    init(fileId: MediaId, isPremiumEmoji: Bool = false, emojiReference: Int? = nil) {
+        self.fileId = fileId
+        self.isPremiumEmoji = isPremiumEmoji
+        self.emojiReference = emojiReference
+    }
+    init(fileId: MediaId, partialReference: Int?, resource: LocalBundleResource, previewRepresentations: [Int], videoThumbnails: [Int], immediateThumbnailData: Data?, mimeType: String, size: Int?, attributes: [Int], alternativeRepresentations: [Int]) {
+        self.fileId = fileId
+        self.resource = resource
+    }
+    func _parse() -> TelegramMediaFile { self }
+}
+struct StickerPackItem: Equatable {
+    struct Index: Equatable {
+        let index: Int32
+        let id: Int64
+    }
+    var index = Index(index: 0, id: 0)
+    let file: TelegramMediaFile
+    var indexKeys: [String] = []
+    func getStringRepresentationsOfIndexKeys() -> [String] { indexKeys }
+}
 final class EmojiesSectionRowItem {
-    enum Source: Equatable { case builtin(String), custom(MediaId) }
+    __ROW_MODE__
+    enum Source: Equatable { case builtin(String), custom(Int64) }
     struct SelectedItem: Equatable { let source: Source; let index: Int? }
     struct Item { let rect: NSRect; let item: StickerPackItem? }
     var removeRecent: ((MediaId) -> Void)?
     var items: [Item]
-    convenience init(_ size: NSSize, stableId: AnyHashable, context: SectionContext, revealed: Bool, installed: Bool, info: Int?, items: [StickerPackItem], mode: PickerMode, selectedItems: [SelectedItem], color: NSColor?, callback: Int?, largeCallback: Int?, drag: Int?, ignorePremium: Bool, removeRecent: ((MediaId) -> Void)?) {
-        self.init(items.map { $0.file.fileId })
+    var mode: Mode = .panel
+    var selectedItems: [SelectedItem] = []
+    var revealed = false
+    var color: NSColor?
+    var showAllItems: (() -> Void)?
+    convenience init(_ size: NSSize, stableId: AnyHashable, context: SectionContext, revealed: Bool, installed: Bool, info: Int?, items: [StickerPackItem], mode: Mode, selectedItems: [SelectedItem], color: NSColor?, callback: Int?, largeCallback: Int?, drag: Int?, showAllItems: (() -> Void)? = nil, ignorePremium: Bool, removeRecent: ((MediaId) -> Void)? = nil) {
+        self.init([])
+        self.items = items.enumerated().map { index, item in
+            Item(rect: NSRect(x: index * 40, y: 0, width: 34, height: 34), item: item)
+        }
+        self.mode = mode
+        self.selectedItems = selectedItems
+        self.revealed = revealed
+        self.color = color
+        self.showAllItems = showAllItems
         self.removeRecent = removeRecent
     }
     init(_ ids: [MediaId]) {

@@ -57,8 +57,8 @@ def check_wiring(controller, builtin, animated, row, source_revision):
 def main():
     parser = argparse.ArgumentParser(description="Focused recent-emoji regression tests using real Cocoa, Strings and SwiftSignalKit.", epilog="Postbox transactions, preference storage, MediaId and UI row state are adapters; no live database, full UI dispatch, server or app build is verified.")
     parser.add_argument("--signal-kit", type=Path, required=True)
-    parser.add_argument("--compatibility-ref", default="upstream/pr117")
-    parser.add_argument("--source-revision", help="Read production sources at this revision without changing the worktree; section regression baseline: 422a3a0b.")
+    parser.add_argument("--compatibility-ref", default="592446a5f9833ec24c84844b571d9caf6f06dec9")
+    parser.add_argument("--source-revision", help="Read production sources at this revision without changing the worktree; picker regression baseline: cacb1121; empty-section baseline: 422a3a0b.")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[3]
     dependency = args.signal_kit.resolve()
@@ -81,6 +81,10 @@ def main():
     renderer = declaration(controller, "private func segments(").removeprefix("private ")
     segment_list = controller[controller.index("    var seglist = seg.map"):controller.index("    let isPremium = state.peer?.peer.isPremium")].strip()
     replacements = {
+        "__PICKER_MODE__": declaration(controller, "public enum EmojiesControllerMode {").replace("public ", "").replace("enum EmojiesControllerMode {", "enum PickerMode: CaseIterable {"),
+        "__ROW_MODE__": declaration(animated, "public enum Mode {").replace("public ", ""),
+        "__ROW_SELECTION__": declaration(controller, "private func emojiesRowSelection(").removeprefix("private "),
+        "__REACTION_VALUE__": declaration(controller, "private extension RecentReactionItem.Content {").removeprefix("private "),
         "__SEGMENT_LIST__": segment_list,
         "__SOURCE_KEY__": next(line for line in builtin.splitlines() if line.startswith("let recentEmojiSourceKey =")),
         "__BUILTIN_MENU__": declaration(builtin, "public override func menuItems(in location:").replace("public override func", "func", 1),
@@ -97,13 +101,16 @@ def main():
             raise ValueError(f"Expected exactly one placeholder: {marker}")
         print(f"{marker.strip('_')}: sha256 {hashlib.sha256(source.encode()).hexdigest()}", flush=True)
         adapters = adapters.replace(marker, source)
-    builtin_rows_marker = "if arguments.mode == .emoji || arguments.mode == .stories {\n                struct Tuple"
-    builtin_rows = declaration(controller, builtin_rows_marker)
-    section_rows = controller[controller.index("            let hasAnimatedRecent ="):controller.index(builtin_rows_marker) + len(builtin_rows)]
+    section_replacements = {
+        "__PREPARE_SEGMENTS__": controller[controller.index("    var e = emojiesInstance"):controller.index("    var seglist = seg.map")],
+        "__PREPARE_RECENTS__": controller[controller.index("    let isPremium = state.peer?.peer.isPremium"):controller.index("    if let search = state.search")],
+        "__SECTION_ROWS__": declaration(controller, "for key in seglist {"),
+    }
     section_fixture = Path(__file__).with_name("SectionEntries.swift.in").read_text()
-    assert section_fixture.count("__SECTION_ROWS__") == 1
-    section_fixture = section_fixture.replace("__SECTION_ROWS__", section_rows)
-    print(f"SECTION_ROWS: sha256 {hashlib.sha256(section_rows.encode()).hexdigest()}", flush=True)
+    for marker, source in section_replacements.items():
+        assert section_fixture.count(marker) == 1
+        section_fixture = section_fixture.replace(marker, source)
+        print(f"{marker.strip('_')}: sha256 {hashlib.sha256(source.encode()).hexdigest()}", flush=True)
     revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", args.compatibility_ref], text=True).strip()
     print(f"Compatibility source: {args.compatibility_ref} ({revision})", flush=True)
     def from_ref(path):
@@ -147,7 +154,7 @@ let package = Package(name: "RemoveRecentEmoji", platforms: [.macOS(.v10_13)], d
                 failures = [case for case, outcome in cases if outcome == "failed"]
             print(f"SUMMARY {name}: {len(cases)} tests, {len(failures)} failing: {failures}", flush=True)
             status |= bool(result.returncode or failures or not cases)
-    print("Scope: full production RecentUsedEmoji (module imports stripped only), full real Strings, real Cocoa/CoreText and SwiftSignalKit; JSON persistence is tested separately from the in-memory transactional adapter. Builtin menu body, segments, custom/builtin section-entry construction and both hit-test helpers are extracted unchanged; font/attributed-string factory, MediaId, preferences, InputDataEntry and row/layer/menu models are adapters. Animated menu tests cover its removal branch only. Source wiring is checked, not full controller/UI execution or actual mouse dispatch. PR117 composition injects current removal methods/wrappers into that ref's whole model with its own Strings, and substitutes that ref's segments value expression; not a full merge, exhaustive PR117 review or full UI compatibility test.", flush=True)
+    print("Scope: full production RecentUsedEmoji (module imports stripped only), full real Strings, real Cocoa/CoreText and SwiftSignalKit; JSON persistence is tested separately from the in-memory transactional adapter. Builtin menu body, segments/filter preparation, recent-item resolution, complete browsing segment loop, row selection and both hit-test helpers are extracted unchanged; all picker modes and item-mode mapping come from production. Font/attributed-string factory, MediaId, preferences, media/reaction/peer/context data, topic-file hook, default-status-pack predicate, localization, InputDataEntry and row/layer/menu models are adapters. Animated menu tests cover its removal branch only. Search execution, tabs, installed-pack/collectible rows, subscriptions, full controller/UI execution and actual mouse dispatch are not tested. PR117 composition injects current removal methods/wrappers into that ref's whole model with its own Strings, and substitutes that ref's segments value expression; not a full merge, exhaustive PR117 review or full UI compatibility test.", flush=True)
     return int(status)
 
 
