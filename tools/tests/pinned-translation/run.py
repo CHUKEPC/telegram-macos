@@ -21,6 +21,7 @@ def declaration(source, marker):
 parser = argparse.ArgumentParser(description='Run extracted production translation state and actual ChatUI projection tests with model adapters.')
 parser.add_argument('--telegram-core', type=Path, help='Existing TelegramCore checkout containing Sources/SyncCore.')
 parser.add_argument('--negative-control', action='store_true', help='Include stableVersion in source identity to reproduce version-only invalidation.')
+parser.add_argument('--header-source-revision', help='Read only the pinned header update expressions from a Git revision; animation baseline: ea656cf0.')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
 core = args.telegram_core or root / 'submodules/telegram-ios/submodules/TelegramCore'
@@ -51,6 +52,15 @@ for path, fixture in [
 ]:
     test = re.sub(r'^(?:@testable )?import .*\n', '', (root / path).read_text(), flags=re.M)
     tests.append(test.replace(declaration(test, 'private func message('), fixture))
+header_path = 'packages/ChatUI/Sources/ChatUI/ChatHeaderController.swift'
+header = (root / header_path).read_text()
+if args.header_source_revision:
+    header = subprocess.check_output(['git', '-C', str(root), 'show', args.header_source_revision + ':' + header_path], text=True)
+update = declaration(header, '    private func update(_ pinnedMessage: ChatPinnedMessage,')
+animation = next(line.strip() for line in update.splitlines() if line.strip().startswith('let animated ='))
+rebuild = next(line.strip().removeprefix('if ').removesuffix(' {') for line in update.splitlines() if line.strip().startswith('if pinnedMessage.messageId !='))
+animation_tests = Path(__file__).with_name('PinnedAnimationTests.swift.in').read_text()
+animation_tests = animation_tests.replace('__ANIMATION_DECISION__', animation).replace('__REBUILD_DECISION__', rebuild)
 with tempfile.TemporaryDirectory(prefix='pinned-translation-') as temporary:
     directory = Path(temporary)
     (directory / 'Tests').mkdir()
@@ -59,6 +69,7 @@ import PackageDescription
 let package = Package(name: "PinnedTranslation", platforms: [.macOS(.v10_13)], targets: [.testTarget(name: "PinnedTranslationTests", path: "Tests")])
 ''')
     (directory / 'Tests/PinnedTranslationTests.swift').write_text('\n'.join([models, translation, projection] + tests))
+    (directory / 'Tests/PinnedAnimationTests.swift').write_text(animation_tests)
     result = subprocess.run(['swift', 'test', '--package-path', str(directory), '--disable-sandbox', '--jobs', '4'])
     if result.returncode:
         raise SystemExit(result.returncode)
@@ -66,7 +77,6 @@ let package = Package(name: "PinnedTranslation", platforms: [.macOS(.v10_13)], t
     availability.write_text('\n'.join([models.replace('import XCTest\n', ''), translation, projection]))
     subprocess.run(['xcrun', 'swiftc', '-parse-as-library', '-typecheck', '-target', 'x86_64-apple-macosx10.13', str(availability)], check=True)
 controller = (root / 'packages/ChatUI/Sources/ChatUI/ChatController.swift').read_text()
-header = (root / 'packages/ChatUI/Sources/ChatUI/ChatHeaderController.swift').read_text()
 assert 'pinnedTranslationResult' not in source
 pinned = declaration(presentation, 'public func pinnedTranslationResult(')
 assert 'stableVersion' not in pinned
@@ -79,4 +89,4 @@ assert translate.index('prepareQueue.justDispatch') < translate.index('let batch
 assert 'current.updateTranslation(batch, toLang: toLang)' in translate
 assert 'if self.holder != sources' in translate
 assert 'repliesToTranslate.append(replyMessage)' in controller and 'translate(messagesToTranslate, replies: repliesToTranslate)' in controller
-print('PASS production state/projection tests, macOS 10.13 availability typecheck and source integration checks. Model/queue/UI boundaries are adapters, not a full application build or server test.')
+print('PASS production state/projection and pinned-animation decision tests, macOS 10.13 availability typecheck and source integration checks. Model/queue/UI boundaries are adapters; animation checks execute real update expressions, not AppKit layer animations or a full application build.')
