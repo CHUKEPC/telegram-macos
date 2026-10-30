@@ -836,6 +836,10 @@ private func entries(_ state: State, arguments: Arguments) -> [InputDataEntry] {
                 index += 1
             }
             
+            guard let lines = seg[key], !lines.isEmpty else {
+                continue
+            }
+
             if key != .Recent || !recentAnimated.isEmpty, arguments.mode == .emoji || arguments.mode == .stories {
                 entries.append(.custom(sectionId: sectionId, index: index, value: .none, identifier: _id_emoji_segment(key.rawValue), equatable: InputDataEquatable(key), comparable: nil, item: { initialSize, stableId in
                     return EStickItem(initialSize, stableId: stableId, segmentName:key.localizedString)
@@ -851,7 +855,6 @@ private func entries(_ state: State, arguments: Arguments) -> [InputDataEntry] {
                     let selectedOrders: [String: Int]
                     let selectionColor: NSColor?
                 }
-                let lines = seg[key] ?? []
                 var selectedOrders: [String: Int] = [:]
                 if state.selectedItems.contains(where: { $0.index != nil }) {
                     let segmentKeys = Set(lines.flatMap { $0.map { emojiSelectionKey($0.string) } })

@@ -1,0 +1,70 @@
+import Cocoa
+import SwiftSignalKit
+
+struct InputDataIdentifier: Equatable {
+    let value: String
+    init(_ value: String) { self.value = value }
+}
+struct InputDataEquatable {
+    init<T: Equatable>(_ value: T) {}
+}
+enum InputDataValue { case none }
+struct InputDataEntry {
+    let identifier: InputDataIdentifier
+    let index: Int32
+    let item: (NSSize, AnyHashable) -> AnyObject
+    static func custom(sectionId: Int32, index: Int32, value: InputDataValue, identifier: InputDataIdentifier, equatable: InputDataEquatable?, comparable: Int?, item: @escaping (NSSize, AnyHashable) -> AnyObject) -> InputDataEntry {
+        InputDataEntry(identifier: identifier, index: index, item: item)
+    }
+    func makeItem() -> AnyObject { item(NSMakeSize(350, 500), AnyHashable(identifier.value)) }
+}
+final class EStickItem {
+    let segmentName: String
+    init(_ size: NSSize, stableId: AnyHashable, segmentName: String) { self.segmentName = segmentName }
+}
+struct SectionContext { let account = Account() }
+struct SectionArguments {
+    let mode: PickerMode
+    let context = SectionContext()
+    let sendEmoji: (String, NSRect) -> Void = { _, _ in }
+    let dragEmoji: Int? = nil
+    let send: Int? = nil
+    let sendLarge: Int? = nil
+    let drag: Int? = nil
+    let ignorePremium = false
+}
+struct SectionState {
+    let recent: RecentUsedEmoji
+    var selectedItems: [EmojiesSectionRowItem.SelectedItem] = []
+    var color: NSColor? = nil
+}
+struct SectionTheme {
+    struct Colors { let text = NSColor.labelColor }
+    let colors = Colors()
+}
+let theme = SectionTheme()
+func emojiSelectionKey(_ value: String) -> String { value.strippedEmoji }
+func emojiesRowSelection(_ selected: [EmojiesSectionRowItem.SelectedItem], in items: [StickerPackItem]) -> [EmojiesSectionRowItem.SelectedItem] {
+    selected.filter { value in
+        if case let .custom(id) = value.source { return items.contains { $0.file.fileId == id } }
+        return false
+    }
+}
+func _id_emoji_segment(_ value: Int) -> InputDataIdentifier { .init("segment_\(value)") }
+func _id_emoji_block(_ value: Int) -> InputDataIdentifier { .init("block_\(value)") }
+
+func emojiSectionEntries(_ seg: [EmojiSegment: [[NSAttributedString]]], state: SectionState, arguments: SectionArguments, recentAnimated: [StickerPackItem]) -> [InputDataEntry] {
+    var entries: [InputDataEntry] = []
+    let sectionId: Int32 = 0
+    var index: Int32 = 0
+    let seglist = recentSegmentList(seg, state: SegmentState(recent: state.recent), arguments: SegmentArguments(mode: arguments.mode))
+    struct Tuple: Equatable {
+        let items: [StickerPackItem]
+        let selected: [EmojiesSectionRowItem.SelectedItem]
+        let color: NSColor?
+    }
+    for key in seglist {
+        __SECTION_ROWS__
+    }
+    return entries
+}

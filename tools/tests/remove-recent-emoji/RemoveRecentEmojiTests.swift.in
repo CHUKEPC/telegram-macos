@@ -196,7 +196,6 @@ final class RemoveRecentEmojiTests: XCTestCase {
 
     func testBuiltinMenuCapturesClickedIdentityWithoutSending() throws {
         let view = EBlockRowView(["✅\u{fe0f}", "😁"])
-        view.emojiUnderMouse = "😁"
         var removed: [String] = []
         var sends = 0
         let item = BuiltinMenu(view: view, removeRecent: { removed.append($0) })
@@ -206,7 +205,6 @@ final class RemoveRecentEmojiTests: XCTestCase {
         XCTAssertTrue(removed.isEmpty)
         XCTAssertEqual(sends, 0)
         view.lines.removeAll()
-        view.emojiUnderMouse = "🐳"
         let action = try XCTUnwrap(items.last)
         XCTAssertEqual(action.itemMode, .destruct)
         action.handler()
@@ -252,6 +250,75 @@ final class RemoveRecentEmojiTests: XCTestCase {
         }
         let alreadyPresent = segments([.Recent: ["✅"], .People: ["😁"]], skinModifiers: [])
         XCTAssertEqual(recentSegmentList(alreadyPresent, state: SegmentState(recent: customOnly), arguments: SegmentArguments(mode: .emoji)), [.Recent, .People])
+    }
+
+    func sectionRows(_ recent: RecentUsedEmoji, mode: PickerMode, rendered: [EmojiSegment: [[NSAttributedString]]]? = nil, animated: [MediaId]? = nil) -> [InputDataEntry] {
+        let seg = rendered ?? segments([.Recent: recent.emojies, .People: ["😁"]], skinModifiers: recent.skinModifiers)
+        return emojiSectionEntries(seg, state: SectionState(recent: recent), arguments: SectionArguments(mode: mode), recentAnimated: (animated ?? recent.animated).map { StickerPackItem(file: TelegramMediaFile(fileId: $0)) })
+    }
+
+    func testLastOrdinaryRemovalKeepsCustomRowsWithoutEmptyHeaderOrBlock() throws {
+        let recent = settings(["✅"], animated: [a]).removingEmoji("✅")
+        for mode in [PickerMode.emoji, .stories] {
+            let rows = sectionRows(recent, mode: mode)
+            XCTAssertEqual(rows.map { $0.identifier.value }, ["block_100", "segment_1", "block_1"])
+            XCTAssertEqual(rows.map { $0.index }, [0, 1, 2])
+            let custom = try XCTUnwrap(rows.first?.makeItem() as? EmojiesSectionRowItem)
+            XCTAssertEqual(custom.items.compactMap { $0.item?.file.fileId }, [a])
+            XCTAssertNotNil(custom.removeRecent)
+            XCTAssertTrue(rows.compactMap { $0.makeItem() as? EBlockItem }.allSatisfy { !$0.lineAttr.flatMap { $0 }.isEmpty })
+        }
+    }
+
+    func testRemovingFinalCustomRecentLeavesOnlyOrdinaryCategories() {
+        let recent = settings(["✅"], animated: [a]).removingEmoji("✅").removingAnimatedEmoji(a)
+        for mode in [PickerMode.emoji, .stories] {
+            let rows = sectionRows(recent, mode: mode)
+            XCTAssertEqual(rows.map { $0.identifier.value }, ["segment_1", "block_1"])
+            XCTAssertEqual(rows.map { $0.index }, [0, 1])
+        }
+    }
+
+    func testMixedRecentRowsKeepHeaderBetweenCustomAndOrdinaryEmoji() throws {
+        let recent = settings(["✅"], animated: [a])
+        for mode in [PickerMode.emoji, .stories] {
+            let rows = sectionRows(recent, mode: mode)
+            XCTAssertEqual(rows.map { $0.identifier.value }, ["block_100", "segment_0", "block_0", "segment_1", "block_1"])
+            let header = try XCTUnwrap(rows[1].makeItem() as? EStickItem)
+            XCTAssertEqual(header.segmentName, "Frequently Used Emoji")
+            let ordinary = try XCTUnwrap(rows[2].makeItem() as? EBlockItem)
+            XCTAssertEqual(ordinary.lineAttr.flatMap { $0 }.map { $0.string.strippedEmoji }, ["✅"])
+            XCTAssertNotNil(ordinary.removeRecent)
+            XCTAssertNil((rows[4].makeItem() as? EBlockItem)?.removeRecent)
+        }
+    }
+
+    func testOrdinaryOnlyRecentKeepsItsExistingHeaderPolicy() throws {
+        let recent = settings(["✅"])
+        for mode in [PickerMode.emoji, .stories] {
+            let rows = sectionRows(recent, mode: mode)
+            XCTAssertEqual(rows.map { $0.identifier.value }, ["block_0", "segment_1", "block_1"])
+            XCTAssertNotNil((rows[0].makeItem() as? EBlockItem)?.removeRecent)
+        }
+    }
+
+    func testEmptyRenderedRecentDoesNotCreatePlaceholderRows() {
+        let recent = settings([], animated: [a])
+        for mode in [PickerMode.emoji, .stories] {
+            for rendered: [EmojiSegment: [[NSAttributedString]]] in [[:], [.Recent: []]] {
+                XCTAssertEqual(sectionRows(recent, mode: mode, rendered: rendered).map { $0.identifier.value }, ["block_100"])
+                XCTAssertTrue(sectionRows(recent, mode: mode, rendered: rendered, animated: []).isEmpty)
+            }
+        }
+    }
+
+    func testNonEmojiModesDoNotGainOrdinarySectionRowsOrRemoval() {
+        let recent = settings(["✅"], animated: [a])
+        for mode in PickerMode.allCases where mode != .emoji && mode != .stories {
+            let rows = sectionRows(recent, mode: mode)
+            XCTAssertTrue(rows.allSatisfy { $0.identifier.value == "block_100" })
+            XCTAssertTrue(rows.compactMap { $0.makeItem() as? EmojiesSectionRowItem }.allSatisfy { $0.removeRecent == nil })
+        }
     }
 
     func testRendererSourceIdentityAndReusedVisualLayer() throws {
